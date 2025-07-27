@@ -1,5 +1,7 @@
+
 # --- Аутентификация, роли, команды, имперсонация ---
 import yaml
+import streamlit as st
 import streamlit_authenticator as stauth
 
 # Пример хранения пользователей и ролей (можно вынести в отдельный YAML-файл)
