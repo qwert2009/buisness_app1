@@ -1,0 +1,240 @@
+        else:
+            button_label = "🔔"
+           
+        if st.button(button_label, use_container_width=True, type=notification_button_type):
+            st.session_state.current_page = "notifications"
+            st.rerun()
+   
+    with col7:
+        if st.button("🧠 ИИ", use_container_width=True,
+                    type="primary" if st.session_state.current_page == "smart" else "secondary"):
+            st.session_state.current_page = "smart"
+            st.rerun()
+   
+    with col8:
+        if st.button("⚙️ Настройки", use_container_width=True,
+                    type="primary" if st.session_state.current_page == "settings" else "secondary"):
+            st.session_state.current_page = "settings"
+            st.rerun()
+
+def show_admin_navigation():
+    """Дополнительная навигация для администратора"""
+    if st.session_state.get('is_admin', False):
+        st.markdown("---")
+        st.markdown("### 👨‍💼 Панель администратора")
+       
+        # Админские кнопки
+        col1, col2, col3, col4, col5 = st.columns(5)
+       
+        with col1:
+            if st.button("👥 Пользователи", use_container_width=True,
+                        type="primary" if st.session_state.get('admin_page') == "users" else "secondary",
+                        key="admin_users_btn"):
+                st.session_state.admin_page = "users"
+                st.session_state.current_page = "admin"
+                st.rerun()
+       
+        with col2:
+            if st.button("💳 Платежи", use_container_width=True,
+                        type="primary" if st.session_state.get('admin_page') == "payments" else "secondary",
+                        key="admin_payments_btn"):
+                st.session_state.admin_page = "payments"
+                st.session_state.current_page = "admin"
+                st.rerun()
+       
+        with col3:
+            if st.button("📊 Статистика", use_container_width=True,
+                        type="primary" if st.session_state.get('admin_page') == "stats" else "secondary",
+                        key="admin_stats_btn"):
+                st.session_state.admin_page = "stats"
+                st.session_state.current_page = "admin"
+                st.rerun()
+       
+        with col4:
+            if st.button("📈 Отчеты", use_container_width=True,
+                        type="primary" if st.session_state.get('admin_page') == "reports" else "secondary",
+                        key="admin_reports_btn"):
+                st.session_state.admin_page = "reports"
+                st.session_state.current_page = "admin"
+                st.rerun()
+       
+        with col5:
+            if st.button("⚙️ Админ настройки", use_container_width=True,
+                        type="primary" if st.session_state.get('admin_page') == "admin_settings" else "secondary",
+                        key="admin_settings_btn"):
+                st.session_state.admin_page = "admin_settings"
+                st.session_state.current_page = "admin"
+                st.rerun()
+       
+        st.markdown("---")
+
+# Инициализация базы данных
+def init_db():
+    # Добавляем warehouse_id в inventory, если его нет
+    try:
+        cursor.execute("ALTER TABLE inventory ADD COLUMN warehouse_id INTEGER")
+    except Exception:
+        pass
+    conn = sqlite3.connect('business_manager.db')
+    cursor = conn.cursor()
+   
+    # Таблица пользователей с расширенными полями
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            phone TEXT,
+            full_name TEXT,
+            business_name TEXT,
+            is_admin BOOLEAN DEFAULT FALSE,
+            premium_status BOOLEAN DEFAULT FALSE,
+            premium_start_date TIMESTAMP,
+            premium_end_date TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login TIMESTAMP
+        )
+    ''')
+   
+    # Таблица заказов
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            order_type TEXT NOT NULL,
+            order_name TEXT NOT NULL,
+            total_payment REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            delivery_type TEXT,
+            notification_sent INTEGER DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+   
+    # Таблица товаров в заказах
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS order_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER,
+            product_name TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            cost_price REAL NOT NULL,
+            sale_price REAL DEFAULT 0,
+            weight REAL NOT NULL,
+            delivery_cost REAL,
+            total_cost REAL,
+            FOREIGN KEY (order_id) REFERENCES orders (id)
+        )
+    ''')
+   
+    # Проверяем и добавляем колонку sale_price если её нет
+    try:
+        cursor.execute('ALTER TABLE order_items ADD COLUMN sale_price REAL DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass  # Колонка уже существует
+   
+    # Добавляем колонку delivery_type для каждого товара
+    try:
+        cursor.execute('ALTER TABLE order_items ADD COLUMN item_delivery_type TEXT DEFAULT "truck"')
+    except sqlite3.OperationalError:
+        pass  # Колонка уже существует
+   
+    # Добавляем колонки для отслеживания статуса заказов
+    try:
+        cursor.execute('ALTER TABLE orders ADD COLUMN status TEXT DEFAULT "pending"')
+    except sqlite3.OperationalError:
+        pass  # Колонка уже существует
+   
+    try:
+        cursor.execute('ALTER TABLE orders ADD COLUMN expected_delivery_date TIMESTAMP')
+    except sqlite3.OperationalError:
+        pass  # Колонка уже существует
+   
+    try:
+        cursor.execute('ALTER TABLE orders ADD COLUMN actual_delivery_date TIMESTAMP')
+    except sqlite3.OperationalError:
+        pass  # Колонка уже существует
+   
+    try:
+        cursor.execute('ALTER TABLE orders ADD COLUMN delay_notification_sent INTEGER DEFAULT 0')
+    except sqlite3.OperationalError:
+        pass  # Колонка уже существует
+   
+    # Таблица склада
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS inventory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            product_name TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            link TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+   
+    # Таблица истории заказов (для товаров, которые привозятся под заказ)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS order_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            order_id INTEGER,
+            product_name TEXT NOT NULL,
+            quantity INTEGER NOT NULL,
+            cost_price REAL NOT NULL,
+            sale_price REAL NOT NULL,
+            weight REAL NOT NULL,
+            delivery_type TEXT DEFAULT "truck",
+            delivery_cost REAL NOT NULL,
+            total_cost REAL NOT NULL,
+            order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT "completed",
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            FOREIGN KEY (order_id) REFERENCES orders (id)
+        )
+    ''')
+   
+    # Таблица настроек
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            financial_cushion_percent REAL DEFAULT 20.0,
+            email_notifications BOOLEAN DEFAULT 1,
+            smtp_server TEXT,
+            smtp_port INTEGER DEFAULT 587,
+            email_username TEXT,
+            email_password TEXT,
+            notify_new_orders BOOLEAN DEFAULT 1,
+            notify_low_stock BOOLEAN DEFAULT 1,
+            notify_daily_report BOOLEAN DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+   
+    # Добавляем недостающие поля в таблицу settings, если их нет
+    try:
+        cursor.execute("ALTER TABLE settings ADD COLUMN notify_new_orders BOOLEAN DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass  # Поле уже существует
+   
+    try:
+        cursor.execute("ALTER TABLE settings ADD COLUMN notify_low_stock BOOLEAN DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass  # Поле уже существует
+       
+    try:
+        cursor.execute("ALTER TABLE settings ADD COLUMN notify_daily_report BOOLEAN DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # Поле уже существует
+   
+    # Добавляем поля для цен доставки
+    try:
+        cursor.execute("ALTER TABLE settings ADD COLUMN airplane_price_per_kg REAL DEFAULT 5.0")
+    except (sqlite3.OperationalError, sqlite3.ProgrammingError):
+        pass  # Поле уже существует
+   
+    try:
+        cursor.execute("ALTER TABLE settings ADD COLUMN truck_price_per_kg REAL DEFAULT 2.0")
+    except (sqlite3.OperationalError, sqlite3.ProgrammingError):
+        pass  # Поле уже существует
