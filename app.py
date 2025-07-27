@@ -8,23 +8,11 @@ import streamlit_authenticator as stauth
 users_config = {
     'credentials': {
         'usernames': {
-            'admin': {
-                'email': 'admin@company.com',
-                'name': 'Администратор',
-                'password': stauth.Hasher(['adminpass']).generate()[0],
+            'alexkurumbayev@gmail.com': {
+                'email': 'alexkurumbayev@gmail.com',
+                'name': 'Alex Kurumbayev',
+                'password': stauth.Hasher(['qwerty123G']).generate()[0],
                 'role': 'admin',
-            },
-            'manager': {
-                'email': 'manager@company.com',
-                'name': 'Менеджер',
-                'password': stauth.Hasher(['managerpass']).generate()[0],
-                'role': 'editor',
-            },
-            'viewer': {
-                'email': 'viewer@company.com',
-                'name': 'Просмотр',
-                'password': stauth.Hasher(['viewerpass']).generate()[0],
-                'role': 'viewer',
             },
         }
     },
@@ -34,7 +22,7 @@ users_config = {
         'name': 'streamlit_auth',
     },
     'preauthorized': {
-        'emails': ["admin@company.com"]
+        'emails': ["alexkurumbayev@gmail.com"]
     }
 }
 
@@ -59,6 +47,7 @@ def stop_impersonation():
         del st.session_state['impersonated_user']
         st.session_state['user_role'] = get_user_role(st.session_state.get('username'))
 
+
 def show_login():
     authenticator = stauth.Authenticate(
         users_config['credentials'],
@@ -76,6 +65,27 @@ def show_login():
         return True
     elif authentication_status is False:
         st.error('Неверный логин или пароль')
+
+    # --- Регистрация нового пользователя ---
+    with st.expander('Регистрация нового пользователя'):
+        reg_email = st.text_input('Email для регистрации')
+        reg_name = st.text_input('Имя')
+        reg_password = st.text_input('Пароль', type='password')
+        reg_role = st.selectbox('Роль', ['viewer', 'editor'])
+        if st.button('Зарегистрироваться'):
+            if reg_email and reg_password and reg_name:
+                if reg_email in users_config['credentials']['usernames']:
+                    st.warning('Пользователь с таким email уже существует.')
+                else:
+                    users_config['credentials']['usernames'][reg_email] = {
+                        'email': reg_email,
+                        'name': reg_name,
+                        'password': stauth.Hasher([reg_password]).generate()[0],
+                        'role': reg_role,
+                    }
+                    st.success('Пользователь успешно зарегистрирован! Теперь войдите.')
+            else:
+                st.warning('Пожалуйста, заполните все поля для регистрации.')
     return False
 
 def show_impersonation_panel():
