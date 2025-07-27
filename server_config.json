@@ -1,0 +1,32 @@
+{
+  "servers": [
+    {
+      "name": "Local Development",
+      "host": "127.0.0.1",
+      "port": 8501,
+      "priority": 1,
+      "max_connections": 50
+    },
+    {
+      "name": "Local Alternative",
+      "host": "0.0.0.0",
+      "port": 8502,
+      "priority": 2,
+      "max_connections": 50
+    },
+    {
+      "name": "Cloud Server 1",
+      "host": "0.0.0.0",
+      "port": 8503,
+      "priority": 3,
+      "max_connections": 200
+    },
+    {
+      "name": "Cloud Server 2",
+      "host": "0.0.0.0",
+      "port": 8504,
+      "priority": 4,
+      "max_connections": 200
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "auto_start": true,
+  "auto_restart": true,
+  "max_restart_attempts": 5,
+  "restart_delay": 10,
+  "health_check_interval": 30,
+  "backup_on_start": true,
+  "backup_on_crash": true,
+  "preferred_host": "0.0.0.0",
+  "preferred_port": 8501,
+  "fallback_ports": [8502, 8503, 8504, 8505],
+  "enable_monitoring": true,
+  "enable_auto_scaling": true,
+  "log_level": "INFO",
+  "notification_email": null,
+  "telegram_bot_token": null,
+  "telegram_chat_id": null
+}
+
