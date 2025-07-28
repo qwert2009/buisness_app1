@@ -1,4 +1,418 @@
 
+# --- Новый модуль склада из business_manager.py ---
+def show_inventory_page():
+    st.title("🏪 Склад (Премиум+)")
+    user_id = st.session_state.user_id
+    company_id = st.session_state.get('active_company_id')
+    if not company_id:
+        st.warning("Выберите компанию для работы со складом")
+        return
+
+    st.subheader("Добавить товар на склад")
+    with st.form("add_inventory_form"):
+        product_name = st.text_input("Название товара")
+        quantity = st.number_input("Количество", min_value=1)
+        link = st.text_input("Ссылка на товар (необязательно)")
+        warehouses = get_warehouses(company_id)
+        warehouse_options = {w['name']: w['id'] for w in warehouses}
+        selected_warehouse_name = st.selectbox("Склад", list(warehouse_options.keys()) if warehouse_options else ["Нет складов"], key="warehouse_select")
+        selected_warehouse_id = warehouse_options.get(selected_warehouse_name) if selected_warehouse_name != "Нет складов" else None
+        submitted = st.form_submit_button("Добавить товар")
+        if submitted:
+            if product_name and quantity:
+                add_inventory_item(user_id, product_name, quantity, link, company_id, selected_warehouse_id)
+                st.success(f"Товар '{product_name}' добавлен!")
+                st.rerun()
+            else:
+                st.error("Заполните все обязательные поля.")
+
+    st.subheader("Список товаров на складе")
+    inventory_items = get_inventory_items(user_id, company_id)
+    if inventory_items:
+        df_inventory = pd.DataFrame(inventory_items)
+        st.dataframe(df_inventory)
+        selected_item_id = st.selectbox("Товар для обновления/удаления", [item['id'] for item in inventory_items])
+        if selected_item_id:
+            current_item = [item for item in inventory_items if item['id'] == selected_item_id][0]
+            new_quantity = st.number_input(f"Новое количество для {current_item['product_name']}", min_value=0, value=current_item['quantity'])
+            if st.button("Обновить количество"):
+                update_inventory_quantity(selected_item_id, new_quantity)
+                st.success("Количество обновлено.")
+                if new_quantity < 10:
+                    send_low_stock_notification(user_id, current_item['product_name'], new_quantity)
+                st.rerun()
+            if st.button("Удалить товар"):
+                delete_inventory_item(selected_item_id)
+                st.success("Товар удален.")
+                st.rerun()
+    else:
+        st.info("Склад пуст.")
+
+    st.subheader("Мультисклад (Премиум+)")
+    if st.session_state.get('premium_status', False):
+        with st.expander("Добавить склад"):
+            new_warehouse_name = st.text_input("Название склада")
+            new_warehouse_location = st.text_input("Местоположение склада")
+            if st.button("Добавить склад"):
+                if new_warehouse_name and company_id:
+                    add_warehouse(company_id, new_warehouse_name, new_warehouse_location)
+                    st.success(f"Склад '{new_warehouse_name}' добавлен.")
+                    st.rerun()
+                else:
+                    st.error("Укажите название склада и выберите компанию.")
+        st.subheader("Список складов")
+        warehouses = get_warehouses(company_id)
+        if warehouses:
+            df_warehouses = pd.DataFrame(warehouses)
+            st.dataframe(df_warehouses)
+        else:
+            st.info("Нет складов.")
+    else:
+        st.warning("Мультисклад доступен только для Премиум+ пользователей.")
+    if payments:
+        df_payments = pd.DataFrame(payments)
+        st.dataframe(df_payments)
+        selected_payment_id = st.selectbox("Выберите платеж для управления", [p['id'] for p in payments])
+        if selected_payment_id:
+            payment = [p for p in payments if p['id'] == selected_payment_id][0]
+            st.write(f"ID: {payment['id']}")
+            st.write(f"Тип: {payment['record_type']}")
+            st.write(f"Сумма: {payment['amount']}")
+            st.write(f"Описание: {payment['description']}")
+            st.write(f"Дата: {payment['record_date']}")
+            st.write(f"Статус: {'Оплачен' if payment['is_paid'] else 'Не оплачен'}")
+            if st.button("Отметить как оплачено"):
+                update_financial_record_status(payment['id'], True)
+                st.success("Статус обновлен.")
+                st.rerun()
+            if st.button("Отметить как не оплачено"):
+                update_financial_record_status(payment['id'], False)
+                st.success("Статус обновлен.")
+                st.rerun()
+    else:
+        st.info("Нет платежей в системе.")
+
+def show_admin_stats_page():
+    st.title("👨‍💼 Статистика системы (Админ)")
+    st.write("Здесь администратор может просматривать общую статистику системы.")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total_users = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM orders")
+    total_orders = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM financial_records")
+    total_payments = cursor.fetchone()[0]
+    cursor.execute("SELECT SUM(amount) FROM financial_records WHERE record_type = 'income'")
+    total_income = cursor.fetchone()[0] or 0
+    cursor.execute("SELECT SUM(amount) FROM financial_records WHERE record_type = 'expense'")
+    total_expense = cursor.fetchone()[0] or 0
+    conn.close()
+    st.metric("Всего пользователей", total_users)
+    st.metric("Всего заказов", total_orders)
+    st.metric("Всего платежей", total_payments)
+    st.metric("Общий доход", f"{total_income:.2f} руб.")
+    st.metric("Общие расходы", f"{total_expense:.2f} руб.")
+
+def show_admin_reports_page():
+    st.title("👨‍💼 Отчеты системы (Админ)")
+    st.write("Здесь администратор может генерировать отчеты по всей системе.")
+    report_type = st.selectbox("Тип отчета", ["Пользователи", "Заказы", "Платежи", "Финансы"])
+    if st.button("Сгенерировать отчет"):
+        if report_type == "Пользователи":
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users")
+            users = cursor.fetchall()
+            conn.close()
+            if users:
+                df_users = pd.DataFrame(users)
+                st.dataframe(df_users)
+            else:
+                st.info("Нет пользователей.")
+        elif report_type == "Заказы":
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM orders")
+            orders = cursor.fetchall()
+            conn.close()
+            if orders:
+                df_orders = pd.DataFrame(orders)
+                st.dataframe(df_orders)
+            else:
+                st.info("Нет заказов.")
+        elif report_type == "Платежи":
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM financial_records")
+            payments = cursor.fetchall()
+            conn.close()
+            if payments:
+                df_payments = pd.DataFrame(payments)
+                st.dataframe(df_payments)
+            else:
+                st.info("Нет платежей.")
+        elif report_type == "Финансы":
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM financial_records")
+            finances = cursor.fetchall()
+            conn.close()
+            if finances:
+                df_finances = pd.DataFrame(finances)
+                st.dataframe(df_finances)
+            else:
+                st.info("Нет финансовых записей.")
+
+def show_admin_settings_page():
+    st.title("👨‍💼 Админ настройки")
+    st.write("Здесь администратор может управлять системными настройками.")
+    st.subheader("Настройки SMTP сервера для уведомлений")
+    smtp_server = st.text_input("SMTP сервер", value="smtp.yandex.ru")
+    smtp_port = st.number_input("SMTP порт", value=465)
+    smtp_email = st.text_input("Email для отправки уведомлений", value="")
+    smtp_password = st.text_input("Пароль Email", type="password", value="")
+    if st.button("Сохранить настройки SMTP"):
+        st.success("Настройки SMTP сохранены (пример, требуется интеграция с системными настройками)")
+    st.subheader("Резервное копирование базы данных")
+    if st.button("Сделать резервную копию"):
+        st.info("Резервная копия базы данных создана (пример, требуется реализация)")
+    st.subheader("Сброс системы")
+    if st.button("Сбросить все данные (ОПАСНО)"):
+        st.warning("Все данные будут удалены! (пример, требуется реализация)")
+# Финансовые настройки
+def show_financial_settings():
+    """Страница финансовых настроек"""
+    st.title("💰 Финансовые настройки")
+    user_id = st.session_state.user_id
+    settings = get_user_settings(user_id)
+    if not settings:
+        st.warning("Настройки не найдены")
+        return
+    st.subheader("Финансовая подушка")
+    financial_cushion = st.slider("% финансовой подушки", min_value=0, max_value=100, value=int(settings['financial_cushion_percent']))
+    st.subheader("Email уведомления")
+    email_notifications = st.checkbox("Включить email уведомления", value=bool(settings['email_notifications']))
+    smtp_server = st.text_input("SMTP сервер", value=settings['smtp_server'] or "smtp.yandex.ru")
+    smtp_port = st.number_input("SMTP порт", value=settings['smtp_port'] or 465)
+    email_username = st.text_input("Email логин", value=settings['email_username'] or "")
+    email_password = st.text_input("Email пароль", value=settings['email_password'] or "", type="password")
+    st.subheader("Уведомления")
+    notify_new_orders = st.checkbox("Уведомлять о новых заказах", value=bool(settings['notify_new_orders']))
+    notify_low_stock = st.checkbox("Уведомлять о низком остатке", value=bool(settings['notify_low_stock']))
+    notify_daily_report = st.checkbox("Ежедневный отчет на email", value=bool(settings['notify_daily_report']))
+    st.subheader("Цены доставки")
+    airplane_price_per_kg = st.number_input("Цена за кг (самолет)", value=settings['airplane_price_per_kg'] or 5.0)
+    truck_price_per_kg = st.number_input("Цена за кг (грузовик)", value=settings['truck_price_per_kg'] or 2.0)
+    if st.button("Сохранить настройки"):
+        update_user_settings(user_id, financial_cushion, email_notifications, smtp_server, smtp_port, email_username, email_password, notify_new_orders, notify_low_stock, notify_daily_report, airplane_price_per_kg, truck_price_per_kg)
+        st.success("Настройки сохранены!")
+
+# Модуль добавления заказа (одиночные и комплексные)
+def show_add_order():
+    """Добавление нового заказа (одиночный и комплексный)"""
+    st.title("📦 Добавить заказ")
+    user_id = st.session_state.user_id
+    company_id = st.session_state.get('active_company_id')
+    st.subheader("Тип заказа")
+    order_type = st.selectbox("Тип заказа", ["Одиночный", "Комплексный"])
+    order_name = st.text_input("Название заказа")
+    delivery_type = st.selectbox("Тип доставки", ["truck", "airplane"])
+    num_items = st.number_input("Количество позиций", min_value=1, value=1)
+    items = []
+    for i in range(num_items):
+        st.markdown(f"#### Позиция {i+1}")
+        product_name = st.text_input(f"Товар {i+1}", key=f"product_name_{i}")
+        quantity = st.number_input(f"Количество {i+1}", min_value=1, key=f"quantity_{i}")
+        cost_price = st.number_input(f"Себестоимость {i+1}", min_value=0.0, key=f"cost_price_{i}")
+        sale_price = st.number_input(f"Цена продажи {i+1}", min_value=0.0, key=f"sale_price_{i}")
+        weight = st.number_input(f"Вес {i+1} (кг)", min_value=0.0, key=f"weight_{i}")
+        item_delivery_type = st.selectbox(f"Тип доставки для позиции {i+1}", ["truck", "airplane"], key=f"item_delivery_type_{i}")
+        items.append({
+            "product_name": product_name,
+            "quantity": quantity,
+            "cost_price": cost_price,
+            "sale_price": sale_price,
+            "weight": weight,
+            "item_delivery_type": item_delivery_type
+        })
+    submitted = st.button("Добавить заказ")
+    if submitted:
+        total_payment = sum([item['sale_price'] * item['quantity'] for item in items])
+        order_id = add_order(user_id, order_type, order_name, total_payment, delivery_type, company_id)
+        settings = get_user_settings(user_id)
+        for item in items:
+            delivery_cost = item['weight'] * (settings['airplane_price_per_kg'] if item['item_delivery_type'] == 'airplane' else settings['truck_price_per_kg'])
+            total_cost = item['cost_price'] * item['quantity'] + delivery_cost
+            add_order_item(order_id, item['product_name'], item['quantity'], item['cost_price'], item['sale_price'], item['weight'], delivery_cost, total_cost, item['item_delivery_type'])
+        st.success("Заказ успешно добавлен!")
+# Модуль добавления заказа из business_manager.py
+def show_dashboard():
+    """Главная панель управления с улучшенным дизайном"""
+    create_custom_header("📊 Дашборд", "Обзор вашего бизнеса")
+    
+    user_id = st.session_state.user_id
+    company_id = st.session_state.get('active_company_id')
+    
+    if not company_id:
+        create_notification("Выберите активную компанию для просмотра дашборда", "warning")
+        return
+    
+    # Селектор компаний
+    create_company_selector()
+    
+    # Получаем статистику
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Общая статистика
+    cursor.execute("SELECT COUNT(*) FROM orders WHERE user_id = ? AND company_id = ?", (user_id, company_id))
+    total_orders = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT SUM(total_amount) FROM orders WHERE user_id = ? AND company_id = ?", (user_id, company_id))
+    total_revenue = cursor.fetchone()[0] or 0
+    
+    cursor.execute("SELECT COUNT(*) FROM customers WHERE company_id = ?", (company_id,))
+    total_customers = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM inventory WHERE user_id = ? AND company_id = ? AND quantity <= min_stock", (user_id, company_id))
+    low_stock_items = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    # Создаем сетку метрик
+    stats_data = [
+        ("Всего заказов", str(total_orders), "+12%", "positive"),
+        ("Выручка", f"₽{total_revenue:,.0f}", "+8%", "positive"),
+        ("Клиенты", str(total_customers), "+5%", "positive"),
+        ("Низкие остатки", str(low_stock_items), "-2", "negative" if low_stock_items > 0 else "positive")
+    ]
+    
+    create_stats_grid(stats_data)
+    
+    # Графики и аналитика
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # График продаж
+        sales_data = ai_analytics.generate_sales_forecast(user_id, company_id, 30)
+        if sales_data:
+            fig = px.line(
+                x=list(range(len(sales_data))), 
+                y=sales_data,
+                title="Прогноз продаж на 30 дней",
+                labels={'x': 'Дни', 'y': 'Продажи'}
+            )
+            fig.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#333'
+            )
+            create_chart_container(fig, "📈 Прогноз продаж")
+    
+    with col2:
+        # Топ товары
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT i.name, SUM(oi.quantity) as sold
+            FROM order_items oi
+            JOIN inventory i ON oi.inventory_id = i.id
+            JOIN orders o ON oi.order_id = o.id
+            WHERE o.user_id = ? AND o.company_id = ?
+            GROUP BY i.name
+            ORDER BY sold DESC
+            LIMIT 5
+        """, (user_id, company_id))
+        
+        top_products = cursor.fetchall()
+        conn.close()
+        
+        if top_products:
+            products = [p[0] for p in top_products]
+            quantities = [p[1] for p in top_products]
+            
+            fig = px.bar(
+                x=quantities,
+                y=products,
+                orientation='h',
+                title="Топ-5 товаров",
+                labels={'x': 'Продано', 'y': 'Товары'}
+            )
+            fig.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font_color='#333'
+            )
+            create_chart_container(fig, "🏆 Популярные товары")
+    
+    # Быстрые действия
+    st.markdown("### 🚀 Быстрые действия")
+    
+    action_buttons = [
+        ("📦 Новый заказ", "new_order"),
+        ("👥 Добавить клиента", "new_customer"),
+        ("📋 Пополнить склад", "add_inventory"),
+        ("📊 Отчет", "generate_report")
+    ]
+    
+    selected_action = create_action_buttons(action_buttons)
+    
+    if selected_action:
+        if selected_action == "new_order":
+            st.session_state.page = 'orders'
+            st.rerun()
+        elif selected_action == "new_customer":
+            st.session_state.page = 'customers'
+            st.rerun()
+        elif selected_action == "add_inventory":
+            st.session_state.page = 'inventory'
+            st.rerun()
+        elif selected_action == "generate_report":
+            create_notification("Генерация отчета...", "info")
+    
+    # Последние заказы
+    st.markdown("### 📋 Последние заказы")
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, created_at, customer_name, total_amount, status
+        FROM orders 
+        WHERE user_id = ? AND company_id = ?
+        ORDER BY created_at DESC 
+        LIMIT 5
+    """, (user_id, company_id))
+    
+    recent_orders = cursor.fetchall()
+    conn.close()
+    
+    if recent_orders:
+        df = pd.DataFrame(recent_orders, columns=['ID', 'Дата', 'Клиент', 'Сумма', 'Статус'])
+        df['Дата'] = pd.to_datetime(df['Дата']).dt.strftime('%d.%m.%Y %H:%M')
+        df['Сумма'] = df['Сумма'].apply(lambda x: f"₽{x:,.0f}")
+        
+        create_data_table(df, "Последние заказы")
+    else:
+        create_notification("Заказов пока нет", "info")
+    
+    # Уведомления и задачи
+    if st.session_state.get('premium_status'):
+        st.markdown("### 🔔 Уведомления")
+        
+        # Проверяем низкие остатки
+        if low_stock_items > 0:
+            create_notification(f"⚠️ {low_stock_items} товаров с низким остатком на складе", "warning")
+        
+        # AI рекомендации
+        recommendations = ai_assistant.get_business_recommendations(user_id, company_id)
+        if recommendations:
+            st.markdown("### 🤖 AI Рекомендации")
+            for rec in recommendations[:3]:  # Показываем только первые 3
+                create_notification(f"💡 {rec}", "info")
+    else:
+        create_premium_feature_lock("AI Рекомендации и Уведомления")
+
 # --- Аутентификация, роли, команды, имперсонация ---
 import yaml
 import streamlit as st
@@ -1440,35 +1854,113 @@ def show_smart_page():
 
 def show_settings_page():
     st.title("⚙️ Настройки")
+
     user_id = st.session_state.user_id
     settings = get_user_settings(user_id)
 
-    if settings:
-        st.subheader("Общие настройки")
-        new_financial_cushion_percent = st.slider("Процент финансовой подушки (для расчетов)", 0, 100, int(settings['financial_cushion_percent']))
-       
-        st.subheader("Настройки Email уведомлений")
-        new_email_notifications = st.checkbox("Включить Email уведомления", value=settings['email_notifications'])
-        new_smtp_server = st.text_input("SMTP Сервер", value=settings['smtp_server'])
-        new_smtp_port = st.number_input("SMTP Порт", value=settings['smtp_port'])
-        new_email_username = st.text_input("Email (логин)", value=settings['email_username'])
-        new_email_password = st.text_input("Пароль Email", type="password", value=settings['email_password'])
+    # Если настройки не найдены, создаем дефолтные настройки для пользователя
+    if not settings:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO settings (user_id, financial_cushion_percent, email_notifications, smtp_server, smtp_port, email_username, email_password, notify_new_orders, notify_low_stock, notify_daily_report, airplane_price_per_kg, truck_price_per_kg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, 10, False, 'smtp.yandex.ru', 465, '', '', True, True, False, 5.0, 2.0))
+        conn.commit()
+        conn.close()
+        settings = get_user_settings(user_id)
 
-        st.subheader("Типы уведомлений")
-        new_notify_new_orders = st.checkbox("Уведомлять о новых заказах", value=settings['notify_new_orders'])
-        new_notify_low_stock = st.checkbox("Уведомлять о низком остатке на складе", value=settings['notify_low_stock'])
-        new_notify_daily_report = st.checkbox("Отправлять ежедневный отчет", value=settings['notify_daily_report'])
+    st.subheader("Общие настройки")
+    new_financial_cushion_percent = st.slider("Процент финансовой подушки (для расчетов)", 0, 100, int(settings['financial_cushion_percent']))
 
-        st.subheader("Настройки стоимости доставки (за кг)")
-        new_airplane_price_per_kg = st.number_input("Самолет", min_value=0.0, value=settings['airplane_price_per_kg'])
-        new_truck_price_per_kg = st.number_input("Грузовик", min_value=0.0, value=settings['truck_price_per_kg'])
+    st.subheader("Настройки Email уведомлений")
+    new_email_notifications = st.checkbox("Включить Email уведомления", value=settings['email_notifications'])
+    new_smtp_server = st.text_input("SMTP Сервер", value=settings['smtp_server'])
+    new_smtp_port = st.number_input("SMTP Порт", value=settings['smtp_port'])
+    new_email_username = st.text_input("Email (логин)", value=settings['email_username'])
+    new_email_password = st.text_input("Пароль Email", type="password", value=settings['email_password'])
 
-        if st.button("Сохранить настройки"):
-            update_user_settings(user_id, new_financial_cushion_percent, new_email_notifications, new_smtp_server, new_smtp_port, new_email_username, new_email_password, new_notify_new_orders, new_notify_low_stock, new_notify_daily_report, new_airplane_price_per_kg, new_truck_price_per_kg)
-            st.success("Настройки успешно сохранены!")
-            st.rerun()
-    else:
-        st.info("Настройки не найдены. Пожалуйста, войдите в систему.")
+    st.subheader("Типы уведомлений")
+    new_notify_new_orders = st.checkbox("Уведомлять о новых заказах", value=settings['notify_new_orders'])
+    new_notify_low_stock = st.checkbox("Уведомлять о низком остатке на складе", value=settings['notify_low_stock'])
+    new_notify_daily_report = st.checkbox("Отправлять ежедневный отчет", value=settings['notify_daily_report'])
+
+    st.subheader("Настройки стоимости доставки (за кг)")
+    new_airplane_price_per_kg = st.number_input("Самолет", min_value=0.0, value=settings['airplane_price_per_kg'])
+    new_truck_price_per_kg = st.number_input("Грузовик", min_value=0.0, value=settings['truck_price_per_kg'])
+
+    if st.button("Сохранить настройки"):
+        update_user_settings(user_id, new_financial_cushion_percent, new_email_notifications, new_smtp_server, new_smtp_port, new_email_username, new_email_password, new_notify_new_orders, new_notify_low_stock, new_notify_daily_report, new_airplane_price_per_kg, new_truck_price_per_kg)
+        st.success("Настройки успешно сохранены!")
+        st.rerun()
+
+    st.markdown("---")
+    st.subheader("Тестовая отправка email уведомления")
+    st.info("Вы можете проверить настройки SMTP, отправив тестовое письмо на указанный email.")
+    test_email = st.text_input("Email для теста", value=settings['email_username'] if settings else "", key="test_email_settings")
+    if st.button("Отправить тестовое письмо"):
+        subject = "Тестовое уведомление"
+        body = "Это тестовое письмо для проверки настроек SMTP. Если вы получили это письмо, значит настройки корректны."
+        result = send_email(test_email, subject, body, settings['smtp_server'], settings['smtp_port'], settings['email_username'], settings['email_password'])
+        if result:
+            st.success("Тестовое письмо успешно отправлено!")
+        else:
+            st.error("Ошибка при отправке тестового письма. Проверьте настройки SMTP и email.")
+
+    st.markdown("---")
+    st.markdown("**Инструкция по email уведомлениям:**\n- SMTP сервер: адрес почтового сервера (например, smtp.yandex.ru)\n- SMTP порт: обычно 465 или 587\n- Email логин: ваш email для отправки\n- Email пароль: пароль от email (или специальный пароль приложения)\n- Типы уведомлений: выберите, какие события будут отправляться на email.\n- После изменения настроек обязательно сохраните их и протестируйте отправку письма.")
+
+# --- Модуль отправки email-уведомлений (функционал) ---
+import smtplib
+import ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+def send_email(to_email, subject, body, smtp_server, smtp_port, email_username, email_password):
+    """Отправка email через SMTP"""
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = email_username
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(smtp_server, smtp_port, context=context) as server:
+            server.login(email_username, email_password)
+            server.sendmail(email_username, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        st.error(f"Ошибка при отправке email: {e}")
+        return False
+
+def send_new_order_notification(user_id, order_name, total_payment):
+    """Уведомление о новом заказе"""
+    settings = get_user_settings(user_id)
+    if settings and settings['email_notifications'] and settings['notify_new_orders']:
+        user = get_user_by_id(user_id)
+        if user:
+            subject = f"Новый заказ: {order_name}"
+            body = f"У вас новый заказ '{order_name}' на сумму {total_payment} руб.\n\nС уважением,\nВаш Бизнес Менеджер"
+            send_email(user['email'], subject, body, settings['smtp_server'], settings['smtp_port'], settings['email_username'], settings['email_password'])
+
+def send_low_stock_notification(user_id, product_name, quantity):
+    """Уведомление о низком остатке товара"""
+    settings = get_user_settings(user_id)
+    if settings and settings['email_notifications'] and settings['notify_low_stock']:
+        user = get_user_by_id(user_id)
+        if user:
+            subject = f"Низкий запас товара: {product_name}"
+            body = f"Товар '{product_name}' на складе заканчивается. Остаток: {quantity}.\n\nС уважением,\nВаш Бизнес Менеджер"
+            send_email(user['email'], subject, body, settings['smtp_server'], settings['smtp_port'], settings['email_username'], settings['email_password'])
+
+def send_daily_report(user_id):
+    """Ежедневный отчет на email"""
+    settings = get_user_settings(user_id)
+    if settings and settings['email_notifications'] and settings['notify_daily_report']:
+        user = get_user_by_id(user_id)
+        if user:
+            subject = "Ежедневный отчет Бизнес Менеджера"
+            body = "Это ваш ежедневный отчет. Сегодняшние показатели: ...\n\nС уважением,\nВаш Бизнес Менеджер"
+            send_email(user['email'], subject, body, settings['smtp_server'], settings['smtp_port'], settings['email_username'], settings['email_password'])
 
     st.subheader("Мультибизнес")
     if st.session_state.get('premium_status', False):
