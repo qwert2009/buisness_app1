@@ -1880,6 +1880,7 @@ def show_settings_page():
         conn.commit()
         conn.close()
         settings = get_user_settings(user_id)
+        # После создания дефолтных настроек, можно безопасно продолжать выполнение функции
 
     st.subheader("Общие настройки")
     new_financial_cushion_percent = st.slider("Процент финансовой подушки (для расчетов)", 0, 100, int(settings['financial_cushion_percent']))
