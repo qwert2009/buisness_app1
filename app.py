@@ -519,60 +519,73 @@ def show_impersonation_panel():
 # --- Вход и определение роли пользователя ---
 if 'user_role' not in st.session_state:
     if not show_login():
-        st.stop()
 
-# --- Имперсонация ---
-show_impersonation_panel()
-# --- Автоматизация и планировщик задач (базовая интеграция) ---
-from threading import Thread
-import time as _time
-import schedule
+    st.title("⚙️ Настройки")
+    user_id = st.session_state.user_id
+    settings = get_user_settings(user_id)
 
-def run_scheduler():
-    while True:
-        schedule.run_pending()
-        _time.sleep(1)
+    # Если настройки не найдены, создаем дефолтные настройки для пользователя
+    if not settings:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO settings (user_id, financial_cushion_percent, email_notifications, smtp_server, smtp_port, email_username, email_password, notify_new_orders, notify_low_stock, notify_daily_report, airplane_price_per_kg, truck_price_per_kg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, 10, False, 'smtp.yandex.ru', 465, '', '', True, True, False, 5.0, 2.0))
+        conn.commit()
+        conn.close()
+        settings = get_user_settings(user_id)
 
-def schedule_daily_report(user_id):
-    schedule.every().day.at("08:00").do(send_daily_report, user_id)
+    st.subheader("Общие настройки")
+    new_financial_cushion_percent = st.slider("Процент финансовой подушки (для расчетов)", 0, 100, int(settings['financial_cushion_percent']))
+    st.text("Финансовая подушка используется для расчёта рисков и резервов.")
 
-def schedule_monthly_report(user_id):
-    schedule.every(30).days.at("08:00").do(send_daily_report, user_id)
+    st.subheader("Конвертация валют")
+    st.info("Для конвертации валют используйте актуальный курс. (Функция в разработке)")
+    # Пример: поле для ручного ввода курса валют
+    currency_rate = st.number_input("Курс USD/RUB", min_value=0.0, value=95.0)
+    st.text(f"Текущий курс: {currency_rate} руб. за 1 USD")
 
-def start_automation_for_user(user_id, daily=True, monthly=False):
-    if daily:
-        schedule_daily_report(user_id)
-    if monthly:
-        schedule_monthly_report(user_id)
-    Thread(target=run_scheduler, daemon=True).start()
+    st.subheader("Настройки Email уведомлений")
+    new_email_notifications = st.checkbox("Включить Email уведомления", value=settings['email_notifications'])
+    new_smtp_server = st.text_input("SMTP Сервер", value=settings['smtp_server'])
+    new_smtp_port = st.number_input("SMTP Порт", value=settings['smtp_port'])
+    new_email_username = st.text_input("Email (логин)", value=settings['email_username'])
+    new_email_password = st.text_input("Пароль Email", type="password", value=settings['email_password'])
 
-import streamlit as st
-import pandas as pd
-import sqlite3
-import hashlib
-import smtplib
-import ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
-import json
-import os
-import io
-import base64
-import time
-from typing import Optional, List, Dict, Tuple, Any
-import random
-import string
+    st.subheader("Типы уведомлений")
+    new_notify_new_orders = st.checkbox("Уведомлять о новых заказах", value=settings['notify_new_orders'])
+    new_notify_low_stock = st.checkbox("Уведомлять о низком остатке на складе", value=settings['notify_low_stock'])
+    new_notify_daily_report = st.checkbox("Отправлять ежедневный отчет", value=settings['notify_daily_report'])
 
-# Настройка страницы
-st.set_page_config(
-    page_title="Бизнес Менеджер",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+    st.subheader("Настройки стоимости доставки (за кг)")
+    new_airplane_price_per_kg = st.number_input("Самолет", min_value=0.0, value=settings['airplane_price_per_kg'])
+    new_truck_price_per_kg = st.number_input("Грузовик", min_value=0.0, value=settings['truck_price_per_kg'])
+    st.text("Стоимость доставки рассчитывается автоматически при добавлении заказа.")
+
+    st.subheader("Дополнительные настройки")
+    st.checkbox("Включить мультибизнес (несколько компаний)", value=st.session_state.get('premium_status', False), key="multi_business_enabled")
+    st.checkbox("Включить мультисклад (несколько складов)", value=st.session_state.get('premium_status', False), key="multi_warehouse_enabled")
+    st.checkbox("Включить ИИ-функции", value=st.session_state.get('premium_status', False), key="ai_enabled")
+
+    if st.button("Сохранить настройки"):
+        update_user_settings(user_id, new_financial_cushion_percent, new_email_notifications, new_smtp_server, new_smtp_port, new_email_username, new_email_password, new_notify_new_orders, new_notify_low_stock, new_notify_daily_report, new_airplane_price_per_kg, new_truck_price_per_kg)
+        st.success("Настройки успешно сохранены!")
+        st.rerun()
+
+    st.markdown("---")
+    st.subheader("Тестовая отправка email уведомления")
+    st.info("Вы можете проверить настройки SMTP, отправив тестовое письмо на указанный email.")
+    test_email = st.text_input("Email для теста", value=settings['email_username'] if settings else "", key="test_email_settings")
+    if st.button("Отправить тестовое письмо"):
+        subject = "Тестовое уведомление"
+        body = "Это тестовое письмо для проверки настроек SMTP. Если вы получили это письмо, значит настройки корректны."
+        result = send_email(test_email, subject, body, settings['smtp_server'], settings['smtp_port'], settings['email_username'], settings['email_password'])
+        if result:
+            st.success("Тестовое письмо успешно отправлено!")
+        else:
+            st.error("Ошибка при отправке тестового письма.")
+
+    st.markdown("---")
+    st.markdown("**Инструкция по email уведомлениям:**\n- SMTP сервер: адрес почтового сервера (например, smtp.yandex.ru)\n- SMTP порт: обычно 465 или 587\n- Email логин: ваш email для отправки\n- Email пароль: пароль от email (или специальный пароль приложения)\n- Типы уведомлений: выберите, какие события будут отправляться на email.\n- После изменения настроек обязательно сохраните их и протестируйте отправку письма.")
 
 # Минималистичный классический дизайн (CSS)
 st.markdown("""
