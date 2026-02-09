@@ -1,0 +1,261 @@
+"""
+PDS-Ultimate Telethon Integration
+=======================================
+Userbot через Telethon для анализа стиля.
+
+По ТЗ:
+- 7 чатов Telegram для анализа стиля
+- Чтение истории сообщений
+- Анализ стиля переписки владельца
+- Сбор данных для StyleAnalyzer
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timedelta
+from typing import Optional
+
+from pds_ultimate.config import config, logger
+
+
+class TelethonClient:
+    """
+    Userbot для анализа стиля переписки.
+
+    Жизненный цикл:
+        client = TelethonClient()
+        await client.start()          # Авторизация (телефон + код)
+        msgs = await client.get_messages("username", 100)
+        await client.scan_for_style()
+        await client.stop()
+    """
+
+    def __init__(self):
+        self._client = None
+        self._started = False
+
+    async def start(self) -> None:
+        """Запуск Telethon клиента."""
+        if self._started:
+            return
+
+        if not config.telethon.api_id or not config.telethon.api_hash:
+            logger.warning(
+                "Telethon: api_id/api_hash не заданы — клиент не запущен"
+            )
+            return
+
+        try:
+            from telethon import TelegramClient
+
+            self._client = TelegramClient(
+                config.telethon.session_name,
+                config.telethon.api_id,
+                config.telethon.api_hash,
+            )
+
+            await self._client.start()
+            me = await self._client.get_me()
+            self._started = True
+
+            logger.info(
+                f"Telethon подключён как: "
+                f"{me.first_name} {me.last_name or ''} "
+                f"(@{me.username or 'N/A'})"
+            )
+
+        except Exception as e:
+            logger.error(f"Ошибка запуска Telethon: {e}", exc_info=True)
+
+    async def stop(self) -> None:
+        """Остановка клиента."""
+        if self._client:
+            try:
+                await self._client.disconnect()
+            except Exception:
+                pass
+        self._client = None
+        self._started = False
+        logger.info("Telethon отключён")
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Чтение сообщений
+    # ═══════════════════════════════════════════════════════════════════════
+
+    async def get_messages(
+        self,
+        chat_identifier: str,
+        limit: int = 100,
+        offset_days: int = 30,
+    ) -> list[dict]:
+        """
+        Получить сообщения из чата.
+
+        Args:
+            chat_identifier: username, phone, или ID чата
+            limit: Максимальное количество сообщений
+            offset_days: За сколько дней брать
+
+        Returns:
+            [{"text", "date", "from_id", "is_owner", "reply_to"}, ...]
+        """
+        if not self._started:
+            logger.warning("Telethon не запущен — get_messages пропускается")
+            return []
+
+        try:
+            entity = await self._client.get_entity(chat_identifier)
+            me = await self._client.get_me()
+
+            offset_date = datetime.utcnow() - timedelta(days=offset_days)
+
+            messages = await self._client.get_messages(
+                entity,
+                limit=limit,
+                offset_date=offset_date,
+            )
+
+            result = []
+            for msg in messages:
+                if not msg.text:
+                    continue
+
+                result.append({
+                    "text": msg.text,
+                    "date": msg.date.isoformat() if msg.date else "",
+                    "from_id": msg.sender_id,
+                    "is_owner": msg.sender_id == me.id,
+                    "reply_to": msg.reply_to_msg_id,
+                    "chat": str(chat_identifier),
+                })
+
+            logger.info(
+                f"Telethon: получено {len(result)} сообщений "
+                f"из {chat_identifier}"
+            )
+            return result
+
+        except Exception as e:
+            logger.error(
+                f"Ошибка чтения чата {chat_identifier}: {e}",
+                exc_info=True,
+            )
+            return []
+
+    async def get_my_messages(
+        self,
+        chat_identifier: str,
+        limit: int = 100,
+    ) -> list[str]:
+        """
+        Получить только МОИ сообщения из чата.
+        Для анализа стиля нужны только сообщения владельца.
+        """
+        all_msgs = await self.get_messages(chat_identifier, limit)
+        return [m["text"] for m in all_msgs if m["is_owner"]]
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Сканирование для анализа стиля
+    # ═══════════════════════════════════════════════════════════════════════
+
+    async def scan_for_style(
+        self,
+        chats: Optional[list[str]] = None,
+    ) -> dict[str, list[str]]:
+        """
+        Сканировать чаты для анализа стиля переписки.
+
+        По ТЗ: 7 чатов Telegram, config.telethon.style_analysis_chat_count
+
+        Args:
+            chats: Список чатов (username/phone/id).
+                   Если None — берём из конфига.
+
+        Returns:
+            {"chat_identifier": ["msg1", "msg2", ...], ...}
+        """
+        if not self._started:
+            logger.warning("Telethon не запущен — scan_for_style пропускается")
+            return {}
+
+        if chats is None:
+            chats = config.telethon.style_chats
+
+        if not chats:
+            logger.warning("Telethon: нет чатов для анализа стиля")
+            return {}
+
+        # Ограничиваем количество чатов
+        max_chats = config.telethon.style_analysis_chat_count
+        chats_to_scan = chats[:max_chats]
+        msgs_per_chat = config.telethon.messages_per_chat
+
+        result: dict[str, list[str]] = {}
+
+        for chat_id in chats_to_scan:
+            try:
+                my_msgs = await self.get_my_messages(chat_id, msgs_per_chat)
+                if my_msgs:
+                    result[str(chat_id)] = my_msgs
+                    logger.info(
+                        f"  ✓ {chat_id}: {len(my_msgs)} сообщений владельца"
+                    )
+                else:
+                    logger.info(f"  ✗ {chat_id}: нет сообщений владельца")
+
+                # Пауза между чатами (анти-флуд)
+                await asyncio.sleep(1.0)
+
+            except Exception as e:
+                logger.error(f"Ошибка сканирования {chat_id}: {e}")
+
+        total = sum(len(v) for v in result.values())
+        logger.info(
+            f"Telethon: стиль-сканирование завершено — "
+            f"{len(result)} чатов, {total} сообщений"
+        )
+
+        return result
+
+    async def get_dialogs(self, limit: int = 30) -> list[dict]:
+        """
+        Список диалогов (для выбора чатов при настройке).
+
+        Returns:
+            [{"id", "name", "type", "unread_count"}, ...]
+        """
+        if not self._started:
+            return []
+
+        try:
+            dialogs = await self._client.get_dialogs(limit=limit)
+            result = []
+
+            for d in dialogs:
+                dtype = "unknown"
+                if d.is_user:
+                    dtype = "user"
+                elif d.is_group:
+                    dtype = "group"
+                elif d.is_channel:
+                    dtype = "channel"
+
+                result.append({
+                    "id": d.entity.id,
+                    "name": d.name or "(Без имени)",
+                    "type": dtype,
+                    "unread_count": d.unread_count,
+                    "username": getattr(d.entity, "username", None),
+                })
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Ошибка получения диалогов: {e}")
+            return []
+
+
+# ─── Глобальный экземпляр ────────────────────────────────────────────────────
+
+telethon_client = TelethonClient()

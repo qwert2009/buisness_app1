@@ -1,0 +1,43 @@
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# ─── Secrets ──────────────────────────────────────────────────────────────────
+.env
+*.session
+*.session-journal
+credentials/
+token.json
+
+# ─── Environment ──────────────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ─── Data ─────────────────────────────────────────────────────────────────────
+*.db
+*.sqlite3
+data/
+logs/
+backups/
+wa_data/
+
+# ─── IDE ──────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ─── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Lesson files (not part of project) ──────────────────────────────────────
+101.py
+102.py
+103_trigram_contacts.py
+english_game.py
+contact.txt
+contacts_trigram.txt
