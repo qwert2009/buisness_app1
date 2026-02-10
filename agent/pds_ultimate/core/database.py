@@ -860,6 +860,88 @@ class SystemSetting(TimestampMixin, Base):
         return f"<SystemSetting(key='{self.key}', value='{self.value[:50]}')>"
 
 
+# ─── МОДЕЛИ: AI AGENT MEMORY (долгосрочная память агента) ────────────────────
+
+class AgentMemory(TimestampMixin, Base):
+    """
+    Долгосрочная память AI-агента.
+
+    Хранит извлечённые факты, предпочтения, правила и инсайты.
+    Используется для контекстного recall при обработке запросов.
+
+    Типы:
+    - fact: Конкретный факт
+    - preference: Предпочтение пользователя
+    - rule: Бизнес-правило
+    - knowledge: Общее знание
+    - contact_info: Информация о контакте
+    - business_insight: Бизнес-инсайт
+    - episodic: Воспоминание о событии
+    """
+    __tablename__ = "agent_memory"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    memory_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="fact", index=True)
+    importance: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.5)
+    tags: Mapped[Optional[str]] = mapped_column(Text)  # JSON array
+    source: Mapped[Optional[str]] = mapped_column(
+        String(50), default="extraction")
+    metadata_json: Mapped[Optional[str]] = mapped_column(Text)
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_accessed: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    __table_args__ = (
+        Index("ix_agent_memory_type_imp", "memory_type", "importance"),
+        Index("ix_agent_memory_active", "is_active"),
+    )
+
+    def __repr__(self) -> str:
+        preview = self.content[:50] + \
+            "..." if len(self.content) > 50 else self.content
+        return f"<AgentMemory(id={self.id}, type='{self.memory_type}', imp={self.importance:.1f}, content='{preview}')>"
+
+
+class AgentThought(TimestampMixin, Base):
+    """
+    Лог мышления агента (для отладки и аудита).
+
+    Сохраняет цепочку Thought → Action → Observation
+    для каждого обработанного запроса.
+    """
+    __tablename__ = "agent_thoughts"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, index=True)
+    # Исходный запрос пользователя
+    user_query: Mapped[str] = mapped_column(Text, nullable=False)
+    # Количество итераций ReAct loop
+    iterations: Mapped[int] = mapped_column(Integer, default=1)
+    # Использованные инструменты (JSON array)
+    tools_used: Mapped[Optional[str]] = mapped_column(Text)
+    # Финальный ответ
+    final_answer: Mapped[Optional[str]] = mapped_column(Text)
+    # Время обработки (мс)
+    processing_time_ms: Mapped[Optional[int]] = mapped_column(Integer)
+    # Количество записей памяти создано
+    memories_created: Mapped[int] = mapped_column(Integer, default=0)
+    # Был ли использован план
+    plan_used: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (
+        Index("ix_agent_thoughts_chat", "chat_id", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AgentThought(id={self.id}, iters={self.iterations}, tools={self.tools_used})>"
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # DATABASE ENGINE & SESSION
 # ═══════════════════════════════════════════════════════════════════════════════

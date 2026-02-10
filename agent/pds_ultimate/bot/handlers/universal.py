@@ -4,16 +4,21 @@ PDS-Ultimate Universal Handler
 Единственный хэндлер текстовых сообщений.
 Никаких кнопок, никаких шаблонов — только /start и свободный чат.
 
-Логика:
+Архитектура v2.0 — Agent-Driven:
 1. Пользователь пишет ЛЮБОЙ текст
-2. DeepSeek определяет намерение (intent)
-3. Если intent = задача из ТЗ → запуск модуля
-4. Если intent = свободная задача → DeepSeek отвечает напрямую
-5. Учитывается состояние диалога (ожидание ответа, ввод данных)
+2. Smart Router определяет: нужны ли инструменты?
+3. Если да → ReAct Agent (Think → Act → Observe → Reflect)
+4. Если нет → прямой ответ LLM
+5. Stateful flow (ввод заказа, подтверждение) → как раньше
+6. Background Memory Extraction → фоновое запоминание фактов
+
+Вдохновлено: Manus AI, ReAct, MemGPT, Phidata.
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 from datetime import date, timedelta
 
@@ -28,7 +33,9 @@ from pds_ultimate.bot.conversation import (
     conversation_manager,
 )
 from pds_ultimate.config import config, logger
+from pds_ultimate.core.agent import agent
 from pds_ultimate.core.database import (
+    AgentThought,
     ArchivedOrderItem,
     Contact,
     ContactType,
@@ -184,57 +191,72 @@ async def _handle_free(
     db_session: Session,
 ) -> str:
     """
-    Свободный режим. LLM определяет намерение и действует.
-    Агент делает АБСОЛЮТНО ВСЁ что попросят.
+    Свободный режим — AI Agent определяет что делать.
+
+    v2.0: ReAct Agent с инструментами, памятью и рефлексией.
+    Простые запросы → прямой ответ LLM (быстрее).
+    Сложные задачи → ReAct loop с tool calling.
     """
 
     # ─── Проверка кодового слова безопасности ────────────────────────
     if config.security.emergency_code and text.strip() == config.security.emergency_code:
         return await _security_emergency(db_session)
 
-    # ─── Определяем намерение через LLM ──────────────────────────────
-    intent_data = await llm_engine.extract_intent(text)
-    intent = intent_data.get("intent", "general")
-    entities = intent_data.get("entities", {})
+    # ─── Smart Routing: нужны ли инструменты? ────────────────────────
+    needs_tools = await agent.should_use_tools(text)
 
-    logger.info(f"Intent: {intent}, entities: {list(entities.keys())}")
+    if needs_tools:
+        # ─── ReAct Agent Loop ────────────────────────────────────────
+        logger.info(f"Agent: ReAct mode для '{text[:50]}...'")
 
-    # ─── Маршрутизация по намерению ──────────────────────────────────
+        result = await agent.process(
+            message=text,
+            chat_id=ctx.chat_id,
+            history=ctx.get_history_for_llm(),
+            db_session=db_session,
+        )
 
-    if intent == "new_order":
-        return await _start_new_order(ctx, text, db_session)
+        # Логируем мышление агента
+        logger.info(
+            f"Agent: {result.total_iterations} итераций, "
+            f"{len(result.tools_used)} tools, "
+            f"{result.total_time_ms}ms"
+        )
 
-    if intent == "order_status":
-        return await _get_order_status(ctx, entities, db_session)
+        # Сохраняем лог мышления в БД
+        try:
+            thought_log = AgentThought(
+                chat_id=ctx.chat_id,
+                user_query=text[:2000],
+                iterations=result.total_iterations,
+                tools_used=json.dumps(
+                    result.tools_used, ensure_ascii=False) if result.tools_used else None,
+                final_answer=result.answer[:5000] if result.answer else None,
+                processing_time_ms=result.total_time_ms,
+                memories_created=result.memory_entries_created,
+                plan_used=result.plan_used,
+            )
+            db_session.add(thought_log)
+        except Exception as e:
+            logger.warning(f"Не удалось сохранить AgentThought: {e}")
 
-    if intent == "add_items":
-        return await _add_items_to_order(ctx, text, entities, db_session)
+        # Фоновое извлечение фактов из диалога
+        try:
+            dialogue = f"user: {text}\nassistant: {result.answer}"
+            asyncio.create_task(
+                agent.background_extract_memories(dialogue, db_session)
+            )
+        except Exception:
+            pass
 
-    if intent == "finance_query":
-        return await _finance_query(ctx, text, db_session)
+        return result.answer
 
-    if intent == "set_income":
-        return await _start_set_income(ctx, entities, db_session)
-
-    if intent == "set_expense":
-        return await _start_set_expense(ctx, entities, db_session)
-
-    if intent == "delivery_cost":
-        return await _start_delivery(ctx, entities, db_session)
-
-    if intent == "contact_note":
-        return await _handle_contact_note(ctx, text, entities, db_session)
-
-    if intent == "security_emergency":
-        return await _security_emergency(db_session)
-
-    if intent == "morning_brief":
-        return await _morning_brief(db_session)
-
-    # ─── Свободная задача — DeepSeek отвечает напрямую ───────────────
-    # intent == "general", "translate", "create_file", "edit_file",
-    # "calendar_event", "vip_manage", "report" и все остальные
-    return await _general_response(ctx, text)
+    else:
+        # ─── Прямой ответ LLM (простые запросы) ──────────────────────
+        return await agent.direct_response(
+            message=text,
+            history=ctx.get_history_for_llm(),
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1033,7 +1055,6 @@ async def _handle_contact_note(ctx, text, entities, db_session):
         json_mode=True,
     )
 
-    import json
     try:
         data = json.loads(response)
     except Exception:

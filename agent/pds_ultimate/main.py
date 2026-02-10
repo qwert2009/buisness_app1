@@ -57,6 +57,22 @@ async def main():
     await llm_engine.start()
     logger.info("  ✅ LLM Engine запущен")
 
+    # ─── 3.5. Инициализация AI Agent System ─────────────────────────────
+    logger.info("[3.5/7] Инициализация AI Agent (ReAct + Tools + Memory)...")
+    from pds_ultimate.core.business_tools import register_all_tools
+    from pds_ultimate.core.memory import memory_manager
+
+    # Регистрируем бизнес-инструменты
+    tools_count = register_all_tools()
+    logger.info(f"  🔧 Зарегистрировано {tools_count} инструментов")
+
+    # Загружаем долгосрочную память из БД
+    with session_factory() as mem_session:
+        mem_count = memory_manager.load_from_db(mem_session)
+        logger.info(f"  🧠 Загружено {mem_count} записей памяти")
+
+    logger.info("  ✅ AI Agent System инициализирована")
+
     # ─── 4. Запуск интеграций ────────────────────────────────────────────
     logger.info("[4/7] Запуск внешних интеграций...")
 
@@ -180,6 +196,16 @@ async def main():
     finally:
         # ─── Cleanup ─────────────────────────────────────────────────────
         logger.info("Остановка системы...")
+
+        # Сохраняем память агента
+        try:
+            with session_factory() as save_session:
+                saved = memory_manager.save_to_db(save_session)
+                if saved:
+                    logger.info(f"  💾 Сохранено {saved} записей памяти")
+        except Exception as e:
+            logger.warning(f"  ⚠ Ошибка сохранения памяти: {e}")
+
         await scheduler.stop()
         await telethon_client.stop()
         await wa_client.stop()
