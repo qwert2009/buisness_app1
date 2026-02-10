@@ -860,6 +860,88 @@ class SystemSetting(TimestampMixin, Base):
         return f"<SystemSetting(key='{self.key}', value='{self.value[:50]}')>"
 
 
+# ─── МОДЕЛИ: ПОЛЬЗОВАТЕЛИ ───────────────────────────────────────────────────
+
+class UserProfile(TimestampMixin, Base):
+    """
+    Профиль пользователя системы.
+
+    Роли:
+    - owner: Владелец (Вячеслав Амбарцумов) — полный доступ
+    - user: Обычный пользователь — доступ к своим API
+
+    При /start бот спрашивает имя.
+    Если совпадает с владельцем → все предустановленные API.
+    Иначе → guided onboarding с подключением своих API.
+    """
+    __tablename__ = "user_profiles"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="user")  # owner | user
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False)
+    # JSON: персональные настройки (язык, формат, предпочтения)
+    settings_json: Mapped[Optional[str]] = mapped_column(Text)
+    last_active: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Связи
+    api_configs: Mapped[list["UserAPIConfig"]] = relationship(
+        "UserAPIConfig", back_populates="user", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserProfile(id={self.id}, name='{self.name}', role='{self.role}')>"
+
+
+class UserAPIConfig(TimestampMixin, Base):
+    """
+    API конфигурация пользователя.
+
+    Хранит зашифрованные API ключи и настройки для каждого
+    подключённого сервиса. Один пользователь может подключить
+    любое количество API.
+
+    api_type: deepseek, openai, anthropic, whatsapp_green_api,
+              gmail, telegram_bot, custom_api, ...
+    config_data: JSON с зашифрованными ключами
+    """
+    __tablename__ = "user_api_configs"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("user_profiles.chat_id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    api_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    api_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    config_data: Mapped[str] = mapped_column(
+        Text, nullable=False)  # Encrypted JSON
+    is_validated: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_used: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    error_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Связи
+    user: Mapped["UserProfile"] = relationship(
+        "UserProfile", back_populates="api_configs"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("chat_id", "api_type", name="uq_user_api"),
+        Index("ix_user_api_active", "chat_id", "is_active"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserAPIConfig(chat_id={self.chat_id}, api='{self.api_type}', active={self.is_active})>"
+
+
 # ─── МОДЕЛИ: AI AGENT MEMORY (долгосрочная память агента) ────────────────────
 
 class AgentMemory(TimestampMixin, Base):

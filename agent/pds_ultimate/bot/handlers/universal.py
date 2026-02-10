@@ -48,6 +48,7 @@ from pds_ultimate.core.database import (
     TransactionType,
 )
 from pds_ultimate.core.llm_engine import llm_engine
+from pds_ultimate.core.user_manager import user_manager
 
 router = Router(name="universal")
 
@@ -59,29 +60,68 @@ router = Router(name="universal")
 @router.message(CommandStart())
 async def cmd_start(message: Message, db_session: Session) -> None:
     """
-    /start — Приветствие. Единственная команда.
-    Дальше — только свободный чат.
+    /start — Точка входа. Multi-user регистрация.
+
+    Логика:
+    1. Если пользователь уже зарегистрирован → приветствие по имени
+    2. Если нет → просим ввести имя для регистрации
     """
-    ctx = conversation_manager.get(message.chat.id)
-    ctx.reset()
+    chat_id = message.chat.id
+    ctx = conversation_manager.get(chat_id)
 
-    greeting = (
-        "Салам, босс! Я — PDS-Ultimate, твой персональный ассистент.\n\n"
-        "Просто пиши мне что нужно — я пойму.\n\n"
-        "Я умею:\n"
-        "• Вести заказы и логистику\n"
-        "• Считать финансы и прибыль\n"
-        "• Работать с файлами (Excel, Word, PDF)\n"
-        "• Переводить тексты\n"
-        "• Отвечать на любые вопросы\n"
-        "• И вообще всё что скажешь\n\n"
-        "Давай начинать! 💪"
-    )
+    # Проверяем: уже зарегистрирован?
+    profile = user_manager.get_profile(chat_id, db_session)
 
-    await message.answer(greeting)
+    if profile:
+        # Зарегистрированный пользователь — приветствие
+        ctx.reset()
 
-    # Сохраняем в историю БД
-    _save_to_db(db_session, message.chat.id, "assistant", greeting)
+        name = profile["name"].split()[0].capitalize(
+        ) if profile.get("name") else "друг"
+        is_owner = profile["role"] == "owner"
+
+        greeting = (
+            f"Салам, {name}! 👋\n"
+            f"Я — PDS-Ultimate, твой персональный ассистент.\n\n"
+        )
+
+        if is_owner:
+            greeting += (
+                "Все твои API подключены и готовы к работе. 🔧\n\n"
+                "Я умею:\n"
+                "• Вести заказы и логистику\n"
+                "• Считать финансы и прибыль\n"
+                "• Работать с файлами (Excel, Word, PDF)\n"
+                "• Переводить тексты\n"
+                "• Отвечать на любые вопросы\n"
+                "• И вообще всё что скажешь\n\n"
+                "Давай начинать! 💪"
+            )
+        else:
+            # Обычный пользователь — показываем подключённые API
+            apis_msg = user_manager.get_connected_apis_message(
+                chat_id, db_session)
+            greeting += (
+                "Просто пиши мне что нужно — я пойму.\n\n"
+                f"{apis_msg}\n\n"
+                "💡 Чтобы подключить новый API, просто отправь мне API-ключ "
+                "или напиши «подключить API»."
+            )
+
+        await message.answer(greeting)
+        _save_to_db(db_session, chat_id, "assistant", greeting)
+    else:
+        # Новый пользователь — просим имя
+        ctx.set_state(ConversationState.AWAITING_NAME)
+
+        welcome = (
+            "👋 Привет! Я — PDS-Ultimate, AI-ассистент.\n\n"
+            "Для начала, представься — как тебя зовут?\n"
+            "Напиши своё имя и фамилию."
+        )
+
+        await message.answer(welcome)
+        _save_to_db(db_session, chat_id, "assistant", welcome)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -144,6 +184,14 @@ async def _handle_stateful(
 
     state = ctx.state
 
+    # ─── Ожидание имени (регистрация) ────────────────────────────────
+    if state == ConversationState.AWAITING_NAME:
+        return await _state_awaiting_name(ctx, text, db_session)
+
+    # ─── Настройка API (onboarding) ──────────────────────────────────
+    if state == ConversationState.AWAITING_API_SETUP:
+        return await _state_awaiting_api_setup(ctx, text, db_session)
+
     # ─── Ввод позиций заказа ─────────────────────────────────────────
     if state == ConversationState.ORDER_INPUT:
         return await _state_order_input(ctx, text, db_session)
@@ -202,6 +250,44 @@ async def _handle_free(
     if config.security.emergency_code and text.strip() == config.security.emergency_code:
         return await _security_emergency(db_session)
 
+    # ─── Проверка: пользователь отправил API-ключ? ───────────────────
+    if _looks_like_api_key(text):
+        result = await user_manager.detect_and_save_api(
+            ctx.chat_id, text, db_session)
+        if result:
+            is_valid, valid_msg = await user_manager.validate_api(
+                ctx.chat_id, result["api_type"], db_session
+            )
+            status = f"✅ {valid_msg}" if is_valid else f"⚠️ {valid_msg}"
+            return (
+                f"🔑 Обнаружен API-ключ!\n\n"
+                f"API: <b>{result.get('api_name', result['api_type'])}</b>\n"
+                f"Ключ: {result.get('masked_value', '***')}\n"
+                f"Статус: {status}\n\n"
+                f"API подключён и готов к использованию."
+            )
+
+    # ─── Запрос на подключение API (текстовая команда) ────────────────
+    api_trigger_words = {
+        "подключить api", "добавить api", "connect api", "add api",
+        "настроить api", "setup api", "подключить апи", "добавить апи",
+    }
+    if text.strip().lower() in api_trigger_words:
+        ctx.set_state(ConversationState.AWAITING_API_SETUP)
+        from pds_ultimate.core.user_manager import SUPPORTED_APIS
+
+        apis_list = ""
+        for api_type, info in SUPPORTED_APIS.items():
+            apis_list += f"\n• <b>{info['name']}</b> — {info['category']}"
+
+        return (
+            "🔧 Настройка API\n\n"
+            f"Доступные API:{apis_list}\n\n"
+            "Отправь API-ключ — я автоматически определю тип.\n"
+            "Или напиши название API для инструкции.\n"
+            "Напиши «пропустить» чтобы отменить."
+        )
+
     # ─── Smart Routing: нужны ли инструменты? ────────────────────────
     needs_tools = await agent.should_use_tools(text)
 
@@ -257,6 +343,168 @@ async def _handle_free(
             message=text,
             history=ctx.get_history_for_llm(),
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# РЕГИСТРАЦИЯ: Ожидание имени и настройка API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _state_awaiting_name(
+    ctx: ConversationContext,
+    text: str,
+    db_session: Session,
+) -> str:
+    """
+    Состояние: ожидание имени пользователя (регистрация).
+
+    Логика:
+    - Если имя = владелец (Вячеслав Амбарцумов) → полный доступ + все API
+    - Если другое имя → регистрация как обычный user + onboarding
+    """
+    name = text.strip()
+
+    # Валидация: минимум 2 символа, не цифры
+    if len(name) < 2 or name.isdigit():
+        return (
+            "🤔 Это не похоже на имя. Напиши своё имя и фамилию.\n"
+            "Например: Иван Петров"
+        )
+
+    # Регистрируем пользователя
+    profile = await user_manager.register_user(ctx.chat_id, name, db_session)
+
+    if profile["role"] == "owner":
+        # Владелец — полный доступ, все API уже подключены
+        ctx.reset()
+
+        return (
+            f"🎉 С возвращением, {name.split()[0].capitalize()}!\n\n"
+            "Я узнал тебя — все твои API и инструменты подключены автоматически:\n"
+            "• 🤖 DeepSeek AI (reasoning + chat)\n"
+            "• 📱 Telegram Bot\n"
+            "• 💬 WhatsApp (Green-API)\n"
+            "• 📧 Gmail (2 аккаунта)\n\n"
+            "Готов к работе! Пиши что нужно — я пойму. 💪"
+        )
+    else:
+        # Обычный пользователь — onboarding
+        ctx.set_state(ConversationState.AWAITING_API_SETUP)
+
+        first_name = name.split()[0].capitalize()
+        onboarding = (
+            f"🎉 Добро пожаловать, {first_name}!\n\n"
+            + user_manager.get_onboarding_message()
+        )
+        return onboarding
+
+
+async def _state_awaiting_api_setup(
+    ctx: ConversationContext,
+    text: str,
+    db_session: Session,
+) -> str:
+    """
+    Состояние: настройка API (onboarding).
+
+    Пользователь может:
+    1. Отправить API-ключ → автодетект + сохранение
+    2. Написать «пропустить» / «skip» → перейти к работе без API
+    3. Написать «помощь» / «help» → подробная инструкция
+    4. Написать название API → получить гайд по подключению
+    """
+    text_lower = text.strip().lower()
+
+    # Пропустить настройку
+    skip_words = {"пропустить", "skip", "нет", "потом",
+                  "позже", "не хочу", "не надо", "нет спасибо"}
+    if text_lower in skip_words:
+        ctx.reset()
+        # Отмечаем onboarding завершённым
+        from pds_ultimate.core.database import UserProfile
+        db_profile = db_session.query(UserProfile).filter_by(
+            chat_id=ctx.chat_id, is_active=True
+        ).first()
+        if db_profile:
+            db_profile.onboarding_complete = True
+        user_manager.invalidate_cache(ctx.chat_id)
+
+        return (
+            "👍 Хорошо! Ты можешь подключить API в любой момент — "
+            "просто отправь мне API-ключ, и я автоматически определю тип.\n\n"
+            "А пока я могу отвечать на вопросы, переводить тексты, "
+            "работать с файлами и многое другое!\n\n"
+            "Пиши что нужно — начинаем! 🚀"
+        )
+
+    # Запрос помощи
+    help_words = {"помощь", "help",
+                  "что подключить", "какие api", "инструкция"}
+    if text_lower in help_words:
+        from pds_ultimate.core.user_manager import SUPPORTED_APIS
+
+        apis_list = ""
+        for api_type, info in SUPPORTED_APIS.items():
+            apis_list += f"\n• <b>{info['name']}</b> — {info['category']}"
+
+        return (
+            "📋 Доступные API для подключения:\n"
+            f"{apis_list}\n\n"
+            "Чтобы узнать как подключить конкретный API, напиши его название.\n"
+            "Например: «deepseek» или «openai»\n\n"
+            "Или просто отправь API-ключ — я автоматически определю тип! 🔮\n\n"
+            "Напиши «пропустить» чтобы продолжить без API."
+        )
+
+    # Запрос гайда по конкретному API
+    from pds_ultimate.core.user_manager import SUPPORTED_APIS
+    for api_type, info in SUPPORTED_APIS.items():
+        if api_type in text_lower or info["name"].lower() in text_lower:
+            guide = user_manager.get_api_setup_guide(api_type)
+            return (
+                f"{guide}\n\n"
+                "Отправь API-ключ когда будет готов, "
+                "или напиши «пропустить»."
+            )
+
+    # Попытка автодетекта API-ключа из текста
+    result = await user_manager.detect_and_save_api(ctx.chat_id, text, db_session)
+
+    if result:
+        # Успешно определили и сохранили API
+        api_name = result.get("api_name", result.get("api_type", "Unknown"))
+        api_type = result["api_type"]
+
+        # Валидируем API
+        is_valid, valid_msg = await user_manager.validate_api(
+            ctx.chat_id, api_type, db_session
+        )
+
+        if is_valid:
+            response = (
+                f"✅ API подключён: <b>{api_name}</b>\n"
+                f"Ключ: {result.get('masked_value', '***')}\n"
+                f"Статус: {valid_msg}\n\n"
+            )
+        else:
+            response = (
+                f"⚠️ API сохранён: <b>{api_name}</b>\n"
+                f"Ключ: {result.get('masked_value', '***')}\n"
+                f"Статус: {valid_msg}\n\n"
+            )
+
+        response += (
+            "Хочешь подключить ещё один API? Отправь ключ.\n"
+            "Или напиши «пропустить» чтобы начать работу."
+        )
+        return response    # Не распознали — предлагаем помощь
+    return (
+        "🤔 Не удалось распознать API-ключ.\n\n"
+        "Варианты:\n"
+        "• Отправь API-ключ (я автоматически определю тип)\n"
+        "• Напиши название API для инструкции (deepseek, openai...)\n"
+        "• Напиши «помощь» для списка доступных API\n"
+        "• Напиши «пропустить» чтобы начать без API"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1348,6 +1596,43 @@ def _split_message(text: str, max_len: int = 4096) -> list[str]:
         text = text[split_pos:].lstrip("\n")
 
     return chunks
+
+
+def _looks_like_api_key(text: str) -> bool:
+    """
+    Эвристика: текст похож на API-ключ?
+    Проверяем по паттернам из user_manager.
+    """
+    import re
+    text = text.strip()
+
+    # Короткий текст или слишком длинный — не ключ
+    if len(text) < 10 or len(text) > 500:
+        return False
+
+    # Содержит пробелы и не JSON — скорее обычный текст
+    if " " in text and not text.strip().startswith("{"):
+        # Но может быть "sk-xxx мой ключ" — проверяем префиксы
+        first_word = text.split()[0]
+        key_prefixes = ("sk-", "pk-", "Bearer ", "ghp_", "gho_")
+        if not any(first_word.startswith(p) for p in key_prefixes):
+            return False
+
+    # Проверяем по паттернам
+    from pds_ultimate.core.user_manager import API_KEY_PATTERNS
+    for pattern, api_type, field_name in API_KEY_PATTERNS:
+        if re.search(pattern, text):
+            return True
+
+    # JSON с credentials
+    if text.strip().startswith("{"):
+        return True
+
+    # URL, похожий на API endpoint
+    if text.startswith("http") and "api" in text.lower():
+        return True
+
+    return False
 
 
 def _save_to_db(

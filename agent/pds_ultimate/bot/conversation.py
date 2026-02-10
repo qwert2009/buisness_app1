@@ -24,6 +24,8 @@ class ConversationState:
     Агент сам определяет и переключает состояния через LLM.
     """
     FREE = "free"                            # Свободный режим — ЛЮБАЯ задача
+    AWAITING_NAME = "awaiting_name"          # Ожидание имени (onboarding)
+    AWAITING_API_SETUP = "awaiting_api_setup"  # Настройка API (onboarding)
     ORDER_INPUT = "order_input"              # Ввод позиций заказа
     ORDER_CONFIRM = "order_confirm"          # Подтверждение списка позиций
     AWAITING_INCOME = "awaiting_income"      # Ожидание: сколько заплатили МНЕ

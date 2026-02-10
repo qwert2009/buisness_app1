@@ -53,17 +53,16 @@ async def create_bot(
     dp = Dispatcher()
 
     # ─── 3. Регистрация мидлварей (порядок важен!) ───────────────────
-    # Outer middleware → выполняется ПЕРВЫМ
-    # Auth → проверяет что пишет владелец
+    # Database → инжектирует db_session (нужна для Auth проверки регистрации)
+    dp.message.middleware(DatabaseMiddleware(session_factory))
+
+    # Auth → проверяет регистрацию пользователя (использует db_session)
     dp.message.outer_middleware(AuthMiddleware())
 
     # Logging → логируем все входящие
     dp.message.outer_middleware(LoggingMiddleware())
 
-    # Database → инжектирует db_session (с реальной фабрикой)
-    dp.message.middleware(DatabaseMiddleware(session_factory))
-
-    logger.info("  ✓ Мидлвари зарегистрированы (Auth → Log → DB)")
+    logger.info("  ✓ Мидлвари зарегистрированы (DB → Auth → Log)")
 
     # ─── 4. Регистрация роутеров (порядок важен!) ────────────────────
     # voice и files — ПЕРЕД universal, т.к. universal ловит F.text
