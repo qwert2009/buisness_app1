@@ -39,6 +39,10 @@ from pds_ultimate.core.advanced_memory_manager import (
     AdvancedMemoryManager,
     advanced_memory_manager,
 )
+from pds_ultimate.core.cognitive_engine import (
+    CognitiveEngine,
+    cognitive_engine,
+)
 from pds_ultimate.core.memory import MemoryManager, WorkingMemory, memory_manager
 from pds_ultimate.core.tools import ToolRegistry, tool_registry
 
@@ -151,10 +155,12 @@ class Agent:
         tool_reg: ToolRegistry | None = None,
         mem_mgr: MemoryManager | None = None,
         adv_mem: AdvancedMemoryManager | None = None,
+        cog_engine: CognitiveEngine | None = None,
     ):
         self._tools = tool_reg or tool_registry
         self._memory = mem_mgr or memory_manager
         self._adv_memory = adv_mem or advanced_memory_manager
+        self._cognitive = cog_engine or cognitive_engine
         self._llm = None  # Lazy init
 
     @property
@@ -195,6 +201,14 @@ class Agent:
         working = self._adv_memory.get_working(chat_id)
         working.set_goal(message)
 
+        # Cognitive engine: сбрасываем метакогницию для нового запроса
+        self._cognitive.reset_metacog(chat_id)
+
+        # Cognitive engine: определяем роль по типу задачи
+        suggested_role = self._cognitive.role_manager.suggest_role(message)
+        if suggested_role != self._cognitive.role_manager.active_role:
+            self._cognitive.role_manager.switch_role(suggested_role)
+
         # Получаем контекст ошибок (failure-driven learning)
         failure_ctx = ""
         relevant_failures = self._adv_memory.get_relevant_failures(
@@ -210,10 +224,17 @@ class Agent:
         # Time awareness
         time_ctx = self._adv_memory.get_time_context()
 
+        # Cognitive context (план, задачи, метакогниция)
+        cognitive_ctx = self._cognitive.get_cognitive_context(chat_id)
+
+        # Формируем extra_context
+        extra_parts = [p for p in [failure_ctx, time_ctx, cognitive_ctx] if p]
+        extra_context = "\n\n".join(extra_parts)
+
         # Формируем system prompt
         system_prompt = self._build_system_prompt(
             message, working, style_guide,
-            extra_context=f"{failure_ctx}\n\n{time_ctx}" if failure_ctx else time_ctx,
+            extra_context=extra_context,
         )
 
         # Начальные сообщения для LLM
@@ -226,6 +247,23 @@ class Agent:
             step_start = time.time()
 
             step = AgentStep(iteration=iteration)
+
+            # Metacognition: проверяем, не пора ли остановиться
+            mc = self._cognitive.get_metacog(chat_id)
+            if mc.should_abort and iteration > 2:
+                logger.warning(
+                    f"Agent: metacognition abort at iter={iteration} "
+                    f"(stuck={mc.is_stuck}, time={mc.thinking_time_seconds:.1f}s)"
+                )
+                fallback = await self._force_final_answer(message, messages)
+                return AgentResponse(
+                    answer=fallback,
+                    steps=steps,
+                    tools_used=tools_used,
+                    total_iterations=iteration,
+                    total_time_ms=int((time.time() - start_time) * 1000),
+                    memory_entries_created=memory_entries,
+                )
 
             try:
                 # ─── Вызов LLM ───────────────────────────────────────
@@ -252,6 +290,14 @@ class Agent:
                     f"Agent iter={iteration}: thought={action.thought[:100]}... "
                     f"action={action.action_type}"
                 )
+
+                # Cognitive engine: записываем действие и уверенность
+                step_dur = time.time() - step_start
+                self._cognitive.record_action(
+                    chat_id, action.action_type, step_dur)
+                if action.confidence > 0:
+                    self._cognitive.record_confidence(
+                        chat_id, action.confidence)
 
                 # ─── Запоминание ─────────────────────────────────────
                 if hasattr(action, '_should_remember') and action._should_remember:

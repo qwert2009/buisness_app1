@@ -61,6 +61,7 @@ async def main():
     logger.info("[3.5/7] Инициализация AI Agent (ReAct + Tools + Memory)...")
     from pds_ultimate.core.advanced_memory_manager import advanced_memory_manager
     from pds_ultimate.core.business_tools import register_all_tools
+    from pds_ultimate.core.cognitive_engine import cognitive_engine
     from pds_ultimate.core.memory import memory_manager
 
     # Регистрируем бизнес-инструменты
@@ -82,6 +83,14 @@ async def main():
     logger.info(
         f"  📊 Advanced Memory: {stats['total']} записей, "
         f"types={stats['by_type']}, failures={stats['failures_stored']}"
+    )
+
+    # Cognitive engine stats
+    cog_stats = cognitive_engine.get_stats()
+    logger.info(
+        f"  🧠 Cognitive Engine: role={cog_stats['active_role']}, "
+        f"plans={cog_stats['active_plans']}, "
+        f"tasks={cog_stats['tasks']['total']}"
     )
 
     logger.info("  ✅ AI Agent System инициализирована")
