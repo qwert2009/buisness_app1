@@ -152,12 +152,14 @@ class DAGPlan:
         Получить все узлы, готовые к выполнению.
 
         Узел готов если:
-        1. Статус PENDING
+        1. Статус PENDING или READY
         2. Все зависимости COMPLETED
+
+        НЕ мутирует статус — это делает mark_running().
         """
         ready = []
         for node in self.nodes.values():
-            if node.status != NodeStatus.PENDING:
+            if node.status not in (NodeStatus.PENDING, NodeStatus.READY):
                 continue
 
             deps_done = all(
@@ -168,12 +170,79 @@ class DAGPlan:
             )
 
             if deps_done:
-                node.status = NodeStatus.READY
                 ready.append(node)
 
         # Сортируем по приоритету (высокий → первый)
         ready.sort(key=lambda n: n.priority, reverse=True)
         return ready
+
+    def mark_running(self, node_id: str) -> None:
+        """Отметить узел как запущенный."""
+        if node_id in self.nodes:
+            node = self.nodes[node_id]
+            node.status = NodeStatus.RUNNING
+            node.started_at = time.time()
+
+    def topological_sort(self) -> list[str]:
+        """
+        Топологическая сортировка DAG.
+
+        Возвращает порядок выполнения с учётом зависимостей.
+        Если граф имеет цикл — возвращает partial order.
+        """
+        in_degree: dict[str, int] = {nid: 0 for nid in self.nodes}
+        for node in self.nodes.values():
+            for dep in node.depends_on:
+                if dep in in_degree:
+                    in_degree[node.id] = in_degree.get(node.id, 0) + 1
+
+        # Очередь: узлы без входящих рёбер
+        queue = [nid for nid, deg in in_degree.items() if deg == 0]
+        queue.sort(key=lambda nid: self.nodes[nid].priority, reverse=True)
+
+        result = []
+        while queue:
+            nid = queue.pop(0)
+            result.append(nid)
+            # Уменьшаем in_degree для зависимых узлов
+            for node in self.nodes.values():
+                if nid in node.depends_on:
+                    in_degree[node.id] -= 1
+                    if in_degree[node.id] == 0:
+                        queue.append(node.id)
+            queue.sort(key=lambda nid: self.nodes[nid].priority, reverse=True)
+
+        return result
+
+    def get_parallel_groups(self) -> list[list[str]]:
+        """
+        Разбить план на группы параллельно выполняемых шагов.
+
+        Returns:
+            Список групп: [["step_1", "step_2"], ["step_3"], ...]
+        """
+        groups: list[list[str]] = []
+        completed: set[str] = set()
+        remaining = set(self.nodes.keys())
+
+        while remaining:
+            # Найти все узлы, чьи зависимости выполнены
+            group = []
+            for nid in list(remaining):
+                node = self.nodes[nid]
+                if all(d in completed for d in node.depends_on):
+                    group.append(nid)
+
+            if not group:
+                break  # Цикл или ошибка
+
+            group.sort(key=lambda nid: self.nodes[nid].priority, reverse=True)
+            groups.append(group)
+            for nid in group:
+                remaining.discard(nid)
+                completed.add(nid)
+
+        return groups
 
     def complete_node(self, node_id: str, result: str) -> None:
         """Отметить узел как завершённый."""
@@ -669,10 +738,12 @@ class RoleManager:
 
     Один DeepSeek API → разные роли (через system prompt).
     Роли вызываются только при необходимости.
+    Per-chat роли: каждый пользователь может иметь свою активную роль.
     """
 
     def __init__(self):
         self._active_role: AgentRole = AgentRole.EXECUTOR
+        self._per_chat_roles: dict[int, AgentRole] = {}
         self._role_history: list[dict[str, Any]] = []
 
     @property
@@ -744,6 +815,20 @@ class RoleManager:
                 return role
 
         return AgentRole.EXECUTOR
+
+    def get_chat_role(self, chat_id: int) -> AgentRole:
+        """Получить роль для конкретного чата."""
+        return self._per_chat_roles.get(chat_id, self._active_role)
+
+    def set_chat_role(self, chat_id: int, role: AgentRole | str) -> str:
+        """Установить роль для конкретного чата."""
+        if isinstance(role, str):
+            try:
+                role = AgentRole(role)
+            except ValueError:
+                return self.get_role_prompt(self.get_chat_role(chat_id))
+        self._per_chat_roles[chat_id] = role
+        return self.get_role_prompt(role)
 
     @property
     def history(self) -> list[dict]:
@@ -828,6 +913,29 @@ class MetacognitiveState:
         return len(set(last3)) == 1
 
     @property
+    def is_declining(self) -> bool:
+        """
+        Уверенность снижается — агент всё менее уверен.
+
+        Если последние 3 оценки уверенности снижаются → тревога.
+        """
+        if len(self.confidence_history) < 3:
+            return False
+        last3 = self.confidence_history[-3:]
+        return last3[0] > last3[1] > last3[2]
+
+    @property
+    def low_confidence_streak(self) -> int:
+        """Количество подряд идущих низких оценок уверенности (< 0.5)."""
+        streak = 0
+        for c in reversed(self.confidence_history):
+            if c < 0.5:
+                streak += 1
+            else:
+                break
+        return streak
+
+    @property
     def is_taking_too_long(self) -> bool:
         """Слишком долго на одной задаче."""
         return self.thinking_time_seconds > 120  # > 2 мин
@@ -841,6 +949,8 @@ class MetacognitiveState:
             return True
         if self.thinking_time_seconds > 300:  # > 5 мин
             return True
+        if self.low_confidence_streak >= 4:
+            return True  # 4+ раза подряд низкая уверенность
         return False
 
 
@@ -1411,6 +1521,12 @@ class CognitiveEngine:
                     f"  Ср. уверенность: {mc.avg_confidence:.0%}")
             if mc.is_stuck:
                 mc_lines.append("  ⚠️ ЗАЦИКЛИВАНИЕ ОБНАРУЖЕНО")
+            if mc.is_declining:
+                mc_lines.append(
+                    "  📉 УВЕРЕННОСТЬ СНИЖАЕТСЯ — смени стратегию")
+            if mc.low_confidence_streak >= 2:
+                mc_lines.append(
+                    f"  ⚠️ Низкая уверенность {mc.low_confidence_streak}x подряд")
             if mc.is_taking_too_long:
                 mc_lines.append("  ⏰ СЛИШКОМ ДОЛГО — ускорь решение")
             parts.append("\n".join(mc_lines))

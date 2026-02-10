@@ -301,6 +301,56 @@ class TestDAGPlan:
         result = plan.fail_node("nonexistent", "err")
         assert result is False
 
+    def test_topological_sort_linear(self, plan):
+        """Топологическая сортировка — линейная цепочка."""
+        plan.add_node("s1", "Step 1")
+        plan.add_node("s2", "Step 2", depends_on=["s1"])
+        plan.add_node("s3", "Step 3", depends_on=["s2"])
+
+        order = plan.topological_sort()
+        assert order == ["s1", "s2", "s3"]
+
+    def test_topological_sort_parallel(self, plan):
+        """Топологическая сортировка — параллельные узлы по приоритету."""
+        plan.add_node("low", "Low prio", priority=1)
+        plan.add_node("high", "High prio", priority=10)
+        plan.add_node("mid", "Mid prio", priority=5)
+
+        order = plan.topological_sort()
+        assert order[0] == "high"
+        assert order[1] == "mid"
+        assert order[2] == "low"
+
+    def test_topological_sort_diamond(self, plan):
+        """Топологическая сортировка — diamond pattern."""
+        plan.add_node("a", "A")
+        plan.add_node("b", "B", depends_on=["a"])
+        plan.add_node("c", "C", depends_on=["a"])
+        plan.add_node("d", "D", depends_on=["b", "c"])
+
+        order = plan.topological_sort()
+        assert order[0] == "a"
+        assert order[-1] == "d"
+        # b and c must come before d
+        assert order.index("b") < order.index("d")
+        assert order.index("c") < order.index("d")
+
+    def test_topological_sort_empty(self, plan):
+        """Топологическая сортировка — пустой план."""
+        assert plan.topological_sort() == []
+
+    def test_get_ready_nodes_idempotent(self, plan):
+        """get_ready_nodes() — идемпотентный вызов (не мутирует статус)."""
+        plan.add_node("s1", "Step 1")
+        plan.add_node("s2", "Step 2")
+
+        ready1 = plan.get_ready_nodes()
+        ready2 = plan.get_ready_nodes()
+        assert len(ready1) == len(ready2)
+        # Статус не изменился
+        assert plan.nodes["s1"].status == NodeStatus.PENDING
+        assert plan.nodes["s2"].status == NodeStatus.PENDING
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 3. TASK MANAGER
@@ -540,6 +590,31 @@ class TestRoleManager:
         for role in AgentRole:
             assert isinstance(role.value, str)
 
+    def test_per_chat_role_isolation(self, role_mgr):
+        """Per-chat роли изолированы."""
+        role_mgr.set_chat_role(100, AgentRole.CRITIC)
+        role_mgr.set_chat_role(200, AgentRole.PLANNER)
+
+        assert role_mgr.get_chat_role(100) == AgentRole.CRITIC
+        assert role_mgr.get_chat_role(200) == AgentRole.PLANNER
+        # Неизвестный chat → global active_role
+        assert role_mgr.get_chat_role(999) == role_mgr.active_role
+
+    def test_per_chat_role_string(self, role_mgr):
+        """Per-chat роль по строке."""
+        prompt = role_mgr.set_chat_role(100, "analyst")
+        assert role_mgr.get_chat_role(100) == AgentRole.ANALYST
+        assert "Analyst" in prompt
+
+    def test_per_chat_role_invalid(self, role_mgr):
+        """Невалидная per-chat роль — остаётся текущая."""
+        role_mgr.set_chat_role(100, AgentRole.CRITIC)
+        # Попытка установить невалидную
+        role_mgr.set_chat_role(100, "nonexistent")
+        # При невалидной строке get_chat_role возвращает текущий active_role
+        # Но конкретно в нашей реализации — не обновляет per-chat, возвращает prompt
+        assert role_mgr.get_chat_role(100) == AgentRole.CRITIC
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 5. METACOGNITIVE STATE
@@ -606,6 +681,43 @@ class TestMetacognitiveState:
         mc = MetacognitiveState()
         mc.confidence_history = [0.9, 0.7, 0.8]
         assert abs(mc.avg_confidence - 0.8) < 0.01
+
+    def test_declining_confidence(self):
+        """Обнаружение снижающейся уверенности."""
+        mc = MetacognitiveState()
+        mc.confidence_history = [0.9, 0.7, 0.5]
+        assert mc.is_declining is True
+
+    def test_not_declining_confidence(self):
+        """Уверенность не снижается."""
+        mc = MetacognitiveState()
+        mc.confidence_history = [0.5, 0.7, 0.9]
+        assert mc.is_declining is False
+
+    def test_declining_too_few_points(self):
+        """Слишком мало данных для определения decline."""
+        mc = MetacognitiveState()
+        mc.confidence_history = [0.9, 0.7]
+        assert mc.is_declining is False
+
+    def test_low_confidence_streak(self):
+        """Подряд идущие низкие оценки уверенности."""
+        mc = MetacognitiveState()
+        mc.confidence_history = [0.8, 0.6, 0.3, 0.2, 0.1]
+        assert mc.low_confidence_streak == 3  # 0.3, 0.2, 0.1
+
+    def test_low_confidence_streak_none(self):
+        """Нет низких оценок уверенности подряд."""
+        mc = MetacognitiveState()
+        mc.confidence_history = [0.8, 0.7, 0.9]
+        assert mc.low_confidence_streak == 0
+
+    def test_should_abort_low_confidence_streak(self):
+        """Abort при 4+ подряд низких оценках."""
+        mc = MetacognitiveState()
+        mc.confidence_history = [0.8, 0.3, 0.2, 0.1, 0.05]
+        assert mc.low_confidence_streak == 4
+        assert mc.should_abort is True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -887,22 +999,22 @@ class TestEdgeCases:
         ids = {n.id for n in ready}
         assert ids == {"b", "c"}
 
-        # Complete B → need to check C and D
+        # Complete B → C still ready, D not (C not completed)
         plan.complete_node("b", "ok")
-        # C was marked READY by previous get_ready_nodes(), not PENDING
-        # So get_ready_nodes() won't return it (only PENDING → READY).
-        # We need to check that D is NOT ready yet (C not completed).
         ready = plan.get_ready_nodes()
-        # C was already set to READY in previous call, no new PENDING nodes
-        # D is still pending but depends on C which is not completed
-        assert all(n.id != "d" for n in ready)
+        # get_ready_nodes() is idempotent — C is still PENDING
+        assert len(ready) == 1
+        assert ready[0].id == "c"
 
         # Complete C → D ready
         plan.complete_node("c", "ok")
-        # Reset D to PENDING if it's still PENDING (it should be)
         ready = plan.get_ready_nodes()
         assert len(ready) == 1
         assert ready[0].id == "d"
+
+        # Complete D → plan done
+        plan.complete_node("d", "ok")
+        assert plan.is_complete is True
 
     def test_managed_task_no_deadline_not_overdue(self):
         """Задача без дедлайна не может быть просрочена."""

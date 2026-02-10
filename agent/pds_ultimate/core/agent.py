@@ -58,6 +58,7 @@ class AgentAction:
     thought: str = ""
     answer: str = ""
     confidence: float = 0.0
+    _should_remember: str | None = None
 
 
 @dataclass
@@ -267,18 +268,6 @@ class Agent:
 
             try:
                 # ─── Вызов LLM ───────────────────────────────────────
-                raw_response = await self.llm.chat(
-                    message="",  # Уже в messages
-                    history=None,
-                    system_prompt=None,  # Уже в messages
-                    task_type="general",
-                    temperature=0.3,
-                    json_mode=True,
-                    max_tokens=2048,
-                )
-
-                # Парсим messages вручную (LLM engine берёт system_prompt
-                # из build_messages, но мы передаём их через history)
                 raw_response = await self._call_llm(messages)
 
                 # ─── Парсинг ответа ──────────────────────────────────
@@ -300,7 +289,7 @@ class Agent:
                         chat_id, action.confidence)
 
                 # ─── Запоминание ─────────────────────────────────────
-                if hasattr(action, '_should_remember') and action._should_remember:
+                if action._should_remember:
                     self._memory.store_fact(action._should_remember)
                     memory_entries += 1
 
