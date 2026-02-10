@@ -1,10 +1,10 @@
 """
-PDS-Ultimate Gmail Integration
-==================================
-Интеграция с Gmail API.
+PDS-Ultimate Gmail Integration (Dual Account)
+================================================
+Интеграция с Gmail API — два аккаунта (рабочий + личный).
 
 По ТЗ:
-- Чтение входящих писем
+- Чтение входящих писем с обоих аккаунтов
 - Отправка писем (отчёты каждые 3 дня)
 - Ответ на письма в стиле владельца
 - OAuth2 авторизация через credentials.json
@@ -15,29 +15,84 @@ from __future__ import annotations
 import base64
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 from typing import Optional
 
-from pds_ultimate.config import config, logger
+from pds_ultimate.config import BASE_DIR, DATA_DIR, config, logger
+
+
+class GmailAccount:
+    """Один Gmail аккаунт с отдельным service."""
+
+    def __init__(self, name: str, credentials_file: Path, token_file: Path):
+        self.name = name
+        self.credentials_file = credentials_file
+        self.token_file = token_file
+        self._service = None
+
+    def build_service(self):
+        """Построить Gmail service (синхронно)."""
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        from googleapiclient.discovery import build
+
+        SCOPES = [
+            "https://www.googleapis.com/auth/gmail.modify",
+            "https://www.googleapis.com/auth/gmail.send",
+        ]
+
+        creds = None
+
+        if self.token_file.exists():
+            creds = Credentials.from_authorized_user_file(
+                str(self.token_file), SCOPES,
+            )
+
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                if not self.credentials_file.exists():
+                    raise FileNotFoundError(
+                        f"Gmail credentials не найден: "
+                        f"{self.credentials_file}"
+                    )
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    str(self.credentials_file), SCOPES,
+                )
+                creds = flow.run_local_server(port=0)
+
+            self.token_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.token_file, "w") as f:
+                f.write(creds.to_json())
+
+        self._service = build("gmail", "v1", credentials=creds)
+        return self._service
+
+    @property
+    def service(self):
+        return self._service
 
 
 class GmailClient:
     """
-    Клиент Gmail API.
+    Клиент Gmail API с поддержкой двух аккаунтов (рабочий + личный).
 
     Жизненный цикл:
         client = GmailClient()
-        await client.start()        # OAuth2 авторизация
-        emails = await client.get_unread()
-        await client.send_email(to, subject, body)
+        await client.start()        # OAuth2 авторизация обоих
+        emails = await client.get_unread()  # Из обоих аккаунтов
+        await client.send_email(to, subject, body, account="work")
         await client.stop()
     """
 
     def __init__(self):
-        self._service = None
+        self._accounts: dict[str, GmailAccount] = {}
         self._started = False
 
     async def start(self) -> None:
-        """Авторизация в Gmail через OAuth2."""
+        """Авторизация в Gmail через OAuth2 — оба аккаунта."""
         if self._started:
             return
 
@@ -45,89 +100,119 @@ class GmailClient:
             logger.warning("Gmail отключён (GMAIL_ENABLED=false)")
             return
 
-        try:
-            import asyncio
-            # Google API — синхронная библиотека, запускаем в executor
-            loop = asyncio.get_event_loop()
-            self._service = await loop.run_in_executor(
-                None, self._build_service
-            )
-            self._started = True
-            logger.info("Gmail API подключён")
+        import asyncio
+        loop = asyncio.get_event_loop()
 
-        except Exception as e:
-            logger.error(f"Ошибка подключения Gmail: {e}", exc_info=True)
+        creds_dir = BASE_DIR / "credentials"
 
-    def _build_service(self):
-        """Построить Gmail service (синхронно)."""
-        from google.auth.transport.requests import Request
-        from google.oauth2.credentials import Credentials
-        from google_auth_oauthlib.flow import InstalledAppFlow
-        from googleapiclient.discovery import build
-
-        creds = None
-        token_path = config.gmail.token_file
-
-        # Загружаем сохранённый токен
-        if token_path.exists():
-            creds = Credentials.from_authorized_user_file(
-                str(token_path), config.gmail.scopes,
-            )
-
-        # Если токена нет или он невалиден
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                if not config.gmail.credentials_file.exists():
-                    raise FileNotFoundError(
-                        f"Gmail credentials не найден: "
-                        f"{config.gmail.credentials_file}\n"
-                        f"Скачайте из Google Cloud Console."
-                    )
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    str(config.gmail.credentials_file),
-                    config.gmail.scopes,
+        # Рабочий аккаунт
+        work_creds = creds_dir / "gmail_work.json"
+        if work_creds.exists():
+            try:
+                account = GmailAccount(
+                    name="work",
+                    credentials_file=work_creds,
+                    token_file=DATA_DIR / "gmail_token_work.json",
                 )
-                creds = flow.run_local_server(port=0)
+                await loop.run_in_executor(None, account.build_service)
+                self._accounts["work"] = account
+                logger.info("Gmail WORK аккаунт подключён ✅")
+            except Exception as e:
+                logger.error(f"Ошибка подключения Gmail WORK: {e}")
 
-            # Сохраняем токен
-            token_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(token_path, "w") as f:
-                f.write(creds.to_json())
+        # Личный аккаунт
+        personal_creds = creds_dir / "gmail_personal.json"
+        if personal_creds.exists():
+            try:
+                account = GmailAccount(
+                    name="personal",
+                    credentials_file=personal_creds,
+                    token_file=DATA_DIR / "gmail_token_personal.json",
+                )
+                await loop.run_in_executor(None, account.build_service)
+                self._accounts["personal"] = account
+                logger.info("Gmail PERSONAL аккаунт подключён ✅")
+            except Exception as e:
+                logger.error(f"Ошибка подключения Gmail PERSONAL: {e}")
 
-        return build("gmail", "v1", credentials=creds)
+        # Fallback: gmail.json (единый файл)
+        if not self._accounts:
+            fallback_creds = creds_dir / "gmail.json"
+            if fallback_creds.exists():
+                try:
+                    account = GmailAccount(
+                        name="default",
+                        credentials_file=fallback_creds,
+                        token_file=DATA_DIR / "gmail_token.json",
+                    )
+                    await loop.run_in_executor(None, account.build_service)
+                    self._accounts["default"] = account
+                    logger.info("Gmail DEFAULT аккаунт подключён ✅")
+                except Exception as e:
+                    logger.error(f"Ошибка подключения Gmail: {e}")
+
+        if self._accounts:
+            self._started = True
+            names = ", ".join(self._accounts.keys())
+            logger.info(f"Gmail API подключён ({names})")
+        else:
+            logger.warning("Gmail: ни один аккаунт не подключён")
 
     async def stop(self) -> None:
         """Отключение."""
-        self._service = None
+        self._accounts.clear()
         self._started = False
         logger.info("Gmail API отключён")
+
+    def _get_service(self, account: Optional[str] = None):
+        """Получить service нужного аккаунта."""
+        if account and account in self._accounts:
+            return self._accounts[account].service
+        # Первый доступный
+        if self._accounts:
+            return next(iter(self._accounts.values())).service
+        return None
 
     # ═══════════════════════════════════════════════════════════════════════
     # Чтение почты
     # ═══════════════════════════════════════════════════════════════════════
 
-    async def get_unread(self, max_results: int = 10) -> list[dict]:
+    async def get_unread(self, max_results: int = 10, account: Optional[str] = None) -> list[dict]:
         """
         Получить непрочитанные письма.
+        account: "work", "personal" или None (все аккаунты).
 
         Returns:
-            [{"id", "from", "subject", "body", "date"}, ...]
+            [{"id", "from", "subject", "body", "date", "account"}, ...]
         """
         if not self._started:
             return []
 
         import asyncio
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._fetch_unread, max_results,
-        )
 
-    def _fetch_unread(self, max_results: int) -> list[dict]:
+        if account:
+            return await loop.run_in_executor(
+                None, self._fetch_unread, account, max_results,
+            )
+
+        # Из всех аккаунтов
+        all_emails = []
+        for acc_name in self._accounts:
+            emails = await loop.run_in_executor(
+                None, self._fetch_unread, acc_name, max_results,
+            )
+            all_emails.extend(emails)
+        return all_emails
+
+    def _fetch_unread(self, account: str, max_results: int) -> list[dict]:
         """Синхронная выборка непрочитанных."""
+        service = self._get_service(account)
+        if not service:
+            return []
+
         try:
-            result = self._service.users().messages().list(
+            result = service.users().messages().list(
                 userId="me",
                 q="is:unread",
                 maxResults=max_results,
@@ -137,7 +222,7 @@ class GmailClient:
             emails = []
 
             for msg_ref in messages:
-                msg = self._service.users().messages().get(
+                msg = service.users().messages().get(
                     userId="me",
                     id=msg_ref["id"],
                     format="full",
@@ -145,9 +230,11 @@ class GmailClient:
 
                 email_data = self._parse_email(msg)
                 if email_data:
+                    email_data["account"] = account
                     emails.append(email_data)
 
-            logger.info(f"Gmail: получено {len(emails)} непрочитанных")
+            logger.info(
+                f"Gmail [{account}]: получено {len(emails)} непрочитанных")
             return emails
 
         except Exception as e:
@@ -207,6 +294,7 @@ class GmailClient:
         subject: str,
         body: str,
         html: bool = False,
+        account: Optional[str] = None,
     ) -> dict:
         """
         Отправить письмо.
@@ -226,7 +314,7 @@ class GmailClient:
         import asyncio
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, self._send, to, subject, body, html,
+            None, self._send, to, subject, body, html, account,
         )
 
     def _send(
@@ -235,8 +323,13 @@ class GmailClient:
         subject: str,
         body: str,
         html: bool = False,
+        account: Optional[str] = None,
     ) -> dict:
         """Синхронная отправка."""
+        service = self._get_service(account)
+        if not service:
+            return {"error": "Gmail аккаунт не найден"}
+
         try:
             message = MIMEMultipart()
             message["to"] = to
@@ -250,7 +343,7 @@ class GmailClient:
                 message.as_bytes()
             ).decode("utf-8")
 
-            result = self._service.users().messages().send(
+            result = service.users().messages().send(
                 userId="me",
                 body={"raw": raw},
             ).execute()
@@ -269,6 +362,7 @@ class GmailClient:
         to: str,
         subject: str,
         body: str,
+        account: Optional[str] = None,
     ) -> dict:
         """Ответить на письмо (в том же треде)."""
         if not self._started:
@@ -277,7 +371,7 @@ class GmailClient:
         import asyncio
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            None, self._reply, thread_id, message_id, to, subject, body,
+            None, self._reply, thread_id, message_id, to, subject, body, account,
         )
 
     def _reply(
@@ -287,8 +381,13 @@ class GmailClient:
         to: str,
         subject: str,
         body: str,
+        account: Optional[str] = None,
     ) -> dict:
         """Синхронный ответ на письмо."""
+        service = self._get_service(account)
+        if not service:
+            return {"error": "Gmail аккаунт не найден"}
+
         try:
             message = MIMEMultipart()
             message["to"] = to
@@ -304,7 +403,7 @@ class GmailClient:
                 message.as_bytes()
             ).decode("utf-8")
 
-            result = self._service.users().messages().send(
+            result = service.users().messages().send(
                 userId="me",
                 body={"raw": raw, "threadId": thread_id},
             ).execute()
@@ -316,9 +415,13 @@ class GmailClient:
             logger.error(f"Ошибка ответа Gmail: {e}")
             return {"error": str(e)}
 
-    async def mark_as_read(self, message_id: str) -> bool:
+    async def mark_as_read(self, message_id: str, account: Optional[str] = None) -> bool:
         """Пометить как прочитанное."""
         if not self._started:
+            return False
+
+        service = self._get_service(account)
+        if not service:
             return False
 
         import asyncio
@@ -327,7 +430,7 @@ class GmailClient:
         try:
             await loop.run_in_executor(
                 None,
-                lambda: self._service.users().messages().modify(
+                lambda: service.users().messages().modify(
                     userId="me",
                     id=message_id,
                     body={"removeLabelIds": ["UNREAD"]},
