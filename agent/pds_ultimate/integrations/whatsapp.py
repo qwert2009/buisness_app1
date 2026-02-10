@@ -1,43 +1,44 @@
 """
-PDS-Ultimate WhatsApp Integration
-====================================
-Интеграция с WhatsApp через Playwright (browser automation).
+PDS-Ultimate WhatsApp Integration (Green-API)
+================================================
+Интеграция с WhatsApp через Green-API (REST API).
 
 По ТЗ:
 - 3 последних активных чата для анализа стиля
 - Чтение исходящих сообщений владельца
-- Playwright управляет WhatsApp Web
-- Headless режим (WA_HEADLESS=true)
-- Данные браузера сохраняются для повторных сессий
+- Green-API — облачный сервис, не нужен браузер
+- Требует авторизацию через QR-код в консоли Green-API
 """
 
 from __future__ import annotations
 
-import asyncio
 from typing import Optional
+
+import httpx
 
 from pds_ultimate.config import config, logger
 
 
 class WhatsAppClient:
     """
-    Клиент WhatsApp Web через Playwright.
+    Клиент WhatsApp через Green-API (REST).
 
     Жизненный цикл:
         client = WhatsAppClient()
-        await client.start()       # Открывает браузер
-        messages = await client.get_recent_messages(chat_name, limit=100)
-        await client.stop()        # Закрывает браузер
+        await client.start()       # Проверяет авторизацию
+        messages = await client.get_recent_messages(chat_id, limit=100)
+        await client.stop()        # Закрывает HTTP клиент
     """
 
     def __init__(self):
-        self._browser = None
-        self._context = None
-        self._page = None
+        self._http: Optional[httpx.AsyncClient] = None
         self._started = False
+        self._instance_id = ""
+        self._api_token = ""
+        self._base_url = ""
 
     async def start(self) -> None:
-        """Запустить браузер и открыть WhatsApp Web."""
+        """Инициализировать клиент и проверить авторизацию."""
         if self._started:
             return
 
@@ -45,106 +46,89 @@ class WhatsAppClient:
             logger.warning("WhatsApp отключён (WA_ENABLED=false)")
             return
 
-        try:
-            from playwright.async_api import async_playwright
+        self._instance_id = config.whatsapp.green_api_instance
+        self._api_token = config.whatsapp.green_api_token
 
-            self._playwright = await async_playwright().start()
-
-            # Убеждаемся что директория для данных браузера существует
-            browser_data = config.whatsapp.browser_data_dir
-            browser_data.mkdir(parents=True, exist_ok=True)
-
-            self._browser = await self._playwright.chromium.launch_persistent_context(
-                user_data_dir=str(browser_data),
-                headless=config.whatsapp.headless,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                ],
+        if not self._instance_id or not self._api_token:
+            logger.error(
+                "Green-API не настроен: "
+                "задайте WA_GREEN_API_INSTANCE и WA_GREEN_API_TOKEN в .env"
             )
+            return
 
-            self._page = self._browser.pages[0] if self._browser.pages else await self._browser.new_page()
+        self._base_url = (
+            f"https://7103.api.greenapi.com"
+            f"/waInstance{self._instance_id}"
+        )
 
-            # Открываем WhatsApp Web
-            await self._page.goto(
-                "https://web.whatsapp.com",
-                wait_until="domcontentloaded",
-                timeout=60000,
+        self._http = httpx.AsyncClient(timeout=30.0)
+
+        # Проверяем статус авторизации
+        authorized = await self.is_logged_in()
+        if not authorized:
+            logger.warning(
+                "⚠️ WhatsApp Green-API: Status = Not Authorized!\n"
+                "   Зайди в console.green-api.com → "
+                "Link with QR code → отсканируй QR телефоном"
             )
+        else:
+            logger.info("✅ WhatsApp Green-API: авторизован и готов")
 
-            # Ждём загрузки (QR-код или основной экран)
-            await self._wait_for_load()
-
-            self._started = True
-            logger.info("WhatsApp Web запущен")
-
-        except Exception as e:
-            logger.error(f"Ошибка запуска WhatsApp: {e}", exc_info=True)
-            await self.stop()
-            raise
+        self._started = True
+        logger.info("WhatsApp Green-API клиент запущен")
 
     async def stop(self) -> None:
-        """Закрыть браузер."""
-        if self._browser:
+        """Закрыть HTTP клиент."""
+        if self._http:
             try:
-                await self._browser.close()
+                await self._http.aclose()
             except Exception:
                 pass
-        if hasattr(self, "_playwright") and self._playwright:
-            try:
-                await self._playwright.stop()
-            except Exception:
-                pass
-        self._browser = None
-        self._page = None
+        self._http = None
         self._started = False
-        logger.info("WhatsApp Web остановлен")
+        logger.info("WhatsApp Green-API клиент остановлен")
 
     async def is_logged_in(self) -> bool:
-        """Проверить залогинен ли пользователь."""
-        if not self._page:
+        """Проверить авторизацию через Green-API."""
+        if not self._http:
             return False
 
         try:
-            # Ищем элемент поиска чатов — он есть только после логина
-            search = await self._page.query_selector(
-                '[data-testid="chat-list-search"],'
-                '[aria-label="Search input textbox"],'
-                'div[contenteditable="true"][data-tab="3"]'
+            resp = await self._http.get(
+                f"{self._base_url}/getStateInstance/{self._api_token}"
             )
-            return search is not None
-        except Exception:
+            data = resp.json()
+            state = data.get("stateInstance", "")
+            return state == "authorized"
+        except Exception as e:
+            logger.error(f"Ошибка проверки статуса WA: {e}")
             return False
 
-    async def get_recent_chats(self, limit: int = 3) -> list[str]:
+    async def get_recent_chats(self, limit: int = 3) -> list[dict]:
         """
-        Получить имена последних активных чатов.
-        По ТЗ: 3 чата для анализа стиля.
+        Получить последние активные чаты.
+
+        Returns:
+            [{"id": "79001234567@c.us", "name": "Имя контакта"}, ...]
         """
-        if not self._started:
+        if not self._started or not self._http:
             return []
 
         try:
-            # Ждём загрузки списка чатов
-            await self._page.wait_for_selector(
-                '[data-testid="cell-frame-container"]',
-                timeout=15000,
+            resp = await self._http.get(
+                f"{self._base_url}/getChats/{self._api_token}"
             )
+            data = resp.json()
 
-            chat_elements = await self._page.query_selector_all(
-                '[data-testid="cell-frame-container"] '
-                'span[dir="auto"][title]'
-            )
+            chats = []
+            for chat in data[:limit]:
+                chat_id = chat.get("id", "")
+                name = chat.get("name", "") or chat_id
+                if chat_id and "@c.us" in chat_id:  # Только личные чаты
+                    chats.append({"id": chat_id, "name": name})
 
-            chat_names = []
-            for elem in chat_elements[:limit]:
-                title = await elem.get_attribute("title")
-                if title:
-                    chat_names.append(title)
-
-            logger.info(f"WhatsApp: найдено {len(chat_names)} чатов")
-            return chat_names
+            logger.info(f"WhatsApp: найдено {len(chats)} чатов")
+            return chats
 
         except Exception as e:
             logger.error(f"Ошибка получения чатов WA: {e}")
@@ -152,82 +136,108 @@ class WhatsAppClient:
 
     async def get_recent_messages(
         self,
-        chat_name: str,
+        chat_id: str,
         limit: int = 100,
         outgoing_only: bool = True,
     ) -> list[dict]:
         """
-        Получить последние сообщения из чата.
+        Получить последние сообщения из чата через Green-API.
 
         Args:
-            chat_name: Имя чата
+            chat_id: ID чата (например "79001234567@c.us")
             limit: Максимум сообщений
             outgoing_only: Только исходящие (для анализа стиля)
 
         Returns:
-            [{"text": "...", "timestamp": "...", "is_outgoing": True}, ...]
+            [{"text": "...", "timestamp": 1234567890, "is_outgoing": True}, ...]
         """
-        if not self._started:
+        if not self._started or not self._http:
             return []
 
         try:
-            # Открываем чат
-            await self._open_chat(chat_name)
-            await asyncio.sleep(2)  # Ждём загрузки сообщений
-
-            # Прокручиваем вверх для загрузки истории
-            for _ in range(3):
-                await self._page.evaluate(
-                    """() => {
-                        const panel = document.querySelector('[data-testid="conversation-panel-messages"]');
-                        if (panel) panel.scrollTop = 0;
-                    }"""
-                )
-                await asyncio.sleep(1)
-
-            # Собираем сообщения
-            msg_elements = await self._page.query_selector_all(
-                'div[data-testid="msg-container"]'
+            resp = await self._http.post(
+                f"{self._base_url}/getChatHistory/{self._api_token}",
+                json={"chatId": chat_id, "count": limit},
             )
+            data = resp.json()
 
             messages = []
-            for elem in msg_elements[-limit:]:
-                try:
-                    msg_data = await self._parse_message(elem)
-                    if msg_data:
-                        if outgoing_only and not msg_data.get("is_outgoing"):
-                            continue
-                        messages.append(msg_data)
-                except Exception:
+            for msg in data:
+                msg_type = msg.get("type", "")
+                # Только текстовые
+                if msg_type not in ("outgoing", "incoming"):
                     continue
 
+                is_outgoing = msg_type == "outgoing"
+                if outgoing_only and not is_outgoing:
+                    continue
+
+                text = msg.get("textMessage", "") or ""
+                if not text:
+                    # Попробуем extendedTextMessage
+                    ext = msg.get("extendedTextMessageData", {})
+                    text = ext.get("text", "") if ext else ""
+
+                if text:
+                    messages.append({
+                        "text": text.strip(),
+                        "is_outgoing": is_outgoing,
+                        "timestamp": msg.get("timestamp", 0),
+                    })
+
             logger.info(
-                f"WhatsApp: {len(messages)} сообщений из чата '{chat_name}'"
+                f"WhatsApp: {len(messages)} сообщений из чата '{chat_id}'"
             )
             return messages
 
         except Exception as e:
-            logger.error(f"Ошибка чтения сообщений WA '{chat_name}': {e}")
+            logger.error(f"Ошибка чтения сообщений WA '{chat_id}': {e}")
             return []
+
+    async def send_message(self, chat_id: str, text: str) -> bool:
+        """Отправить текстовое сообщение."""
+        if not self._started or not self._http:
+            return False
+
+        try:
+            resp = await self._http.post(
+                f"{self._base_url}/sendMessage/{self._api_token}",
+                json={"chatId": chat_id, "message": text},
+            )
+            data = resp.json()
+            success = "idMessage" in data
+            if success:
+                logger.info(f"WhatsApp: сообщение отправлено в {chat_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Ошибка отправки WA сообщения: {e}")
+            return False
 
     async def get_style_messages(self) -> list[str]:
         """
         Собрать исходящие сообщения из N чатов для анализа стиля.
         По ТЗ: 3 чата, 100 сообщений из каждого.
         """
-        if not self._started or not await self.is_logged_in():
-            logger.warning("WhatsApp не готов для анализа стиля")
+        if not self._started:
+            logger.warning("WhatsApp не запущен")
             return []
 
-        all_messages = []
+        if not await self.is_logged_in():
+            logger.warning(
+                "WhatsApp не авторизован — "
+                "отсканируй QR в console.green-api.com"
+            )
+            return []
+
+        all_messages: list[str] = []
         chat_count = config.whatsapp.style_analysis_chat_count
         msg_limit = config.whatsapp.messages_per_chat
 
         chats = await self.get_recent_chats(limit=chat_count)
 
-        for chat_name in chats:
+        for chat in chats:
             messages = await self.get_recent_messages(
-                chat_name, limit=msg_limit, outgoing_only=True,
+                chat["id"], limit=msg_limit, outgoing_only=True,
             )
             for msg in messages:
                 if msg.get("text"):
@@ -238,89 +248,6 @@ class WhatsAppClient:
             f"из {len(chats)} чатов для анализа стиля"
         )
         return all_messages
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # Internal
-    # ═══════════════════════════════════════════════════════════════════════
-
-    async def _wait_for_load(self, timeout: int = 120) -> None:
-        """Ждать загрузки WhatsApp Web (QR или главный экран)."""
-        try:
-            await self._page.wait_for_selector(
-                '[data-testid="chat-list-search"],'
-                '[data-testid="qrcode"],'
-                'canvas[aria-label="Scan me!"]',
-                timeout=timeout * 1000,
-            )
-
-            # Проверяем что это не QR-код
-            qr = await self._page.query_selector(
-                '[data-testid="qrcode"], canvas[aria-label="Scan me!"]'
-            )
-            if qr:
-                logger.warning(
-                    "⚠️ WhatsApp Web требует сканирования QR-кода! "
-                    "Откройте WA_BROWSER_DATA директорию в браузере "
-                    "или запустите с WA_HEADLESS=false"
-                )
-
-        except Exception as e:
-            logger.warning(f"Таймаут загрузки WhatsApp Web: {e}")
-
-    async def _open_chat(self, chat_name: str) -> None:
-        """Открыть чат по имени."""
-        # Кликаем на поиск
-        search_box = await self._page.wait_for_selector(
-            'div[contenteditable="true"][data-tab="3"]',
-            timeout=10000,
-        )
-
-        # Очищаем и вводим имя чата
-        await search_box.click()
-        await self._page.keyboard.press("Control+A")
-        await self._page.keyboard.type(chat_name, delay=50)
-        await asyncio.sleep(1.5)
-
-        # Кликаем на первый результат
-        result = await self._page.wait_for_selector(
-            f'span[title="{chat_name}"]',
-            timeout=10000,
-        )
-        if result:
-            await result.click()
-            await asyncio.sleep(1)
-
-    async def _parse_message(self, elem) -> Optional[dict]:
-        """Распарсить DOM-элемент сообщения."""
-        # Текст
-        text_elem = await elem.query_selector(
-            'span[dir="ltr"].selectable-text, '
-            'span.selectable-text[data-testid="msg-text"]'
-        )
-        text = ""
-        if text_elem:
-            text = await text_elem.inner_text()
-
-        if not text:
-            return None
-
-        # Исходящее или входящее
-        classes = await elem.get_attribute("class") or ""
-        is_outgoing = "message-out" in classes
-
-        # Время
-        time_elem = await elem.query_selector(
-            '[data-testid="msg-meta"] span'
-        )
-        timestamp = ""
-        if time_elem:
-            timestamp = await time_elem.inner_text()
-
-        return {
-            "text": text.strip(),
-            "is_outgoing": is_outgoing,
-            "timestamp": timestamp,
-        }
 
 
 # ─── Глобальный экземпляр ────────────────────────────────────────────────────

@@ -146,20 +146,18 @@ class TelethonConfig:
             raise ValueError("TG_API_HASH не задан в .env")
 
 
-# ─── WhatsApp (Playwright) ───────────────────────────────────────────────────
+# ─── WhatsApp (Green-API) ─────────────────────────────────────────────────
 
 @dataclass(frozen=True)
 class WhatsAppConfig:
-    """Конфигурация WhatsApp через Playwright."""
+    """Конфигурация WhatsApp через Green-API."""
     enabled: bool = _env_bool("WA_ENABLED", False)
     # Количество чатов для анализа стиля (по ТЗ: 3 чата WA)
     style_analysis_chat_count: int = _env_int("WA_STYLE_CHATS", 3)
     messages_per_chat: int = _env_int("WA_MESSAGES_PER_CHAT", 100)
-    # Путь к данным браузера (для сохранения сессии WA Web)
-    browser_data_dir: Path = Path(
-        _env("WA_BROWSER_DATA", str(DATA_DIR / "wa_browser"))
-    )
-    headless: bool = _env_bool("WA_HEADLESS", True)
+    # Green-API credentials
+    green_api_instance: str = _env("WA_GREEN_API_INSTANCE", "")
+    green_api_token: str = _env("WA_GREEN_API_TOKEN", "")
 
 
 # ─── DeepSeek API (LLM) ─────────────────────────────────────────────────────
