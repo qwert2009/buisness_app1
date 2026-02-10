@@ -68,6 +68,13 @@ async def main():
     tools_count = register_all_tools()
     logger.info(f"  🔧 Зарегистрировано {tools_count} инструментов")
 
+    # Запуск Browser Engine (для web_search и т.д.)
+    try:
+        await browser_engine.start()
+        logger.info("  🌐 Browser Engine запущен")
+    except Exception as e:
+        logger.warning(f"  ⚠ Browser Engine: {e} (работа без браузера)")
+
     # Загружаем долгосрочную память из БД (оба менеджера)
     with session_factory() as mem_session:
         mem_count = memory_manager.load_from_db(mem_session)
@@ -242,6 +249,10 @@ async def main():
         await telethon_client.stop()
         await wa_client.stop()
         await gmail_client.stop()
+        try:
+            await browser_engine.stop()
+        except Exception:
+            pass
         await llm_engine.stop()
         logger.info("PDS-ULTIMATE остановлен. До встречи!")
 

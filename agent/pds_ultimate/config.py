@@ -355,6 +355,56 @@ class OCRConfig:
     confidence_threshold: float = _env_float("OCR_CONFIDENCE", 0.5)
 
 
+# ─── Browser Engine ─────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class BrowserConfig:
+    """
+    Конфигурация Browser Engine (Playwright).
+
+    Anti-detection, stealth, human-like поведение.
+    Используется для:
+    - Поиск в интернете
+    - Скрапинг данных с сайтов
+    - Работа с WhatsApp Web
+    - Автоматизация веб-форм
+    """
+    # Headless mode (True для сервера, False для отладки)
+    headless: bool = _env_bool("BROWSER_HEADLESS", True)
+    # Тип браузера: chromium, firefox, webkit
+    browser_type: str = _env("BROWSER_TYPE", "chromium")
+    # User-Agent (пустой = рандомный из пула)
+    user_agent: str = _env("BROWSER_USER_AGENT", "")
+    # Viewport размеры
+    viewport_width: int = _env_int("BROWSER_VIEWPORT_W", 1920)
+    viewport_height: int = _env_int("BROWSER_VIEWPORT_H", 1080)
+    # Таймауты (мс)
+    default_timeout: int = _env_int("BROWSER_TIMEOUT", 30000)
+    navigation_timeout: int = _env_int("BROWSER_NAV_TIMEOUT", 60000)
+    # Прокси (опционально)
+    proxy_server: str = _env("BROWSER_PROXY", "")
+    # Директория для скриншотов
+    screenshots_dir: Path = Path(
+        _env("BROWSER_SCREENSHOTS_DIR", str(DATA_DIR / "screenshots"))
+    )
+    # Директория для downloads
+    downloads_dir: Path = Path(
+        _env("BROWSER_DOWNLOADS_DIR", str(DATA_DIR / "downloads"))
+    )
+    # Максимум страниц одновременно
+    max_pages: int = _env_int("BROWSER_MAX_PAGES", 5)
+    # Human-like задержки (мс)
+    min_type_delay: int = _env_int("BROWSER_MIN_TYPE_DELAY", 50)
+    max_type_delay: int = _env_int("BROWSER_MAX_TYPE_DELAY", 150)
+    min_click_delay: int = _env_int("BROWSER_MIN_CLICK_DELAY", 100)
+    max_click_delay: int = _env_int("BROWSER_MAX_CLICK_DELAY", 500)
+    # Stealth mode
+    stealth_enabled: bool = _env_bool("BROWSER_STEALTH", True)
+    # Locale
+    locale: str = _env("BROWSER_LOCALE", "en-US")
+    timezone: str = _env("BROWSER_TIMEZONE", "Asia/Ashgabat")
+
+
 # ─── Сводная конфигурация ────────────────────────────────────────────────────
 
 @dataclass
@@ -381,6 +431,7 @@ class AppConfig:
     style: StyleConfig = field(default_factory=StyleConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
     ocr: OCRConfig = field(default_factory=OCRConfig)
+    browser: BrowserConfig = field(default_factory=BrowserConfig)
 
     @classmethod
     def load(cls) -> "AppConfig":

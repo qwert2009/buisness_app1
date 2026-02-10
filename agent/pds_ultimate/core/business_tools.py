@@ -16,6 +16,7 @@ PDS-Ultimate Business Tools
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, timedelta
 
 from pds_ultimate.config import config, logger
@@ -853,6 +854,66 @@ def register_all_tools() -> int:
             handler=tool_recall,
             category="memory",
         ),
+
+        # ─── Браузер ────────────────────────────────────────────────
+        Tool(
+            name="web_search",
+            description=(
+                "Поиск в интернете через DuckDuckGo. Возвращает список "
+                "результатов (заголовок, URL, сниппет). Используй для поиска "
+                "информации, цен, поставщиков, новостей, курсов."
+            ),
+            parameters=[
+                ToolParameter("query", "string", "Поисковый запрос", True),
+                ToolParameter("max_results", "number",
+                              "Максимум результатов (1-20)", False, 10),
+            ],
+            handler=tool_web_search,
+            category="browser",
+        ),
+        Tool(
+            name="open_page",
+            description=(
+                "Открыть веб-страницу и извлечь её содержимое "
+                "(текст, ссылки, таблицы, мета-данные). "
+                "Используй после web_search чтобы прочитать конкретную страницу."
+            ),
+            parameters=[
+                ToolParameter("url", "string", "URL страницы", True),
+            ],
+            handler=tool_open_page,
+            category="browser",
+        ),
+        Tool(
+            name="browser_screenshot",
+            description="Сделать скриншот текущей страницы в браузере.",
+            parameters=[
+                ToolParameter("full_page", "boolean",
+                              "Полная страница (true) или видимая область", False),
+            ],
+            handler=tool_browser_screenshot,
+            category="browser",
+        ),
+        Tool(
+            name="browser_click",
+            description="Кликнуть по элементу на странице (CSS-селектор).",
+            parameters=[
+                ToolParameter("selector", "string",
+                              "CSS-селектор элемента", True),
+            ],
+            handler=tool_browser_click,
+            category="browser",
+        ),
+        Tool(
+            name="browser_fill",
+            description="Заполнить поле на веб-странице текстом.",
+            parameters=[
+                ToolParameter("selector", "string", "CSS-селектор поля", True),
+                ToolParameter("value", "string", "Текст для ввода", True),
+            ],
+            handler=tool_browser_fill,
+            category="browser",
+        ),
     ]
 
     for tool in tools:
@@ -860,3 +921,133 @@ def register_all_tools() -> int:
 
     logger.info(f"Зарегистрировано {len(tools)} бизнес-инструментов агента")
     return len(tools)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BROWSER TOOLS (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def tool_web_search(query: str, max_results: int = 10, **kwargs) -> ToolResult:
+    """Поиск в интернете через Browser Engine."""
+    from pds_ultimate.core.browser_engine import browser_engine
+
+    try:
+        results = await browser_engine.web_search(
+            query, max_results=min(int(max_results), 20)
+        )
+        if not results:
+            return ToolResult("web_search", True,
+                              f"По запросу «{query}» ничего не найдено.",
+                              data={"results": []})
+
+        lines = [f"🔍 Результаты поиска: «{query}» ({len(results)} шт.)\n"]
+        for r in results:
+            lines.append(f"  {r.position}. {r.title}")
+            lines.append(f"     🔗 {r.url}")
+            if r.snippet:
+                lines.append(f"     {r.snippet[:150]}")
+            lines.append("")
+
+        return ToolResult(
+            "web_search", True, "\n".join(lines),
+            data={"results": [
+                {"title": r.title, "url": r.url, "snippet": r.snippet}
+                for r in results
+            ]},
+        )
+
+    except Exception as e:
+        return ToolResult("web_search", False, "",
+                          error=f"Ошибка поиска: {e}")
+
+
+async def tool_open_page(url: str, **kwargs) -> ToolResult:
+    """Открыть страницу и извлечь данные."""
+    from pds_ultimate.core.browser_engine import browser_engine
+
+    try:
+        data = await browser_engine.extract_data(url)
+
+        if not data.text and not data.title:
+            return ToolResult("open_page", False, "",
+                              error=f"Не удалось загрузить: {url}")
+
+        # Обрезаем текст до разумного размера для LLM
+        text = data.text[:4000] if data.text else ""
+        if len(data.text) > 4000:
+            text += f"\n\n... (ещё {len(data.text) - 4000} символов)"
+
+        lines = [f"📄 {data.title}", f"🔗 {data.url}", ""]
+        if text:
+            lines.append(text)
+
+        if data.tables:
+            lines.append(f"\n📊 Найдено таблиц: {len(data.tables)}")
+            # Показываем первую таблицу
+            for row in data.tables[0][:10]:
+                lines.append("  | " + " | ".join(row[:5]) + " |")
+
+        return ToolResult(
+            "open_page", True, "\n".join(lines),
+            data=data.to_dict(),
+        )
+
+    except Exception as e:
+        return ToolResult("open_page", False, "",
+                          error=f"Ошибка загрузки страницы: {e}")
+
+
+async def tool_browser_screenshot(full_page: bool = False, **kwargs) -> ToolResult:
+    """Скриншот текущей страницы."""
+    from pds_ultimate.core.browser_engine import browser_engine
+
+    try:
+        path = await browser_engine.screenshot(full_page=bool(full_page))
+        return ToolResult(
+            "browser_screenshot", True,
+            f"📸 Скриншот сохранён: {path}",
+            data={"path": str(path)},
+        )
+    except RuntimeError as e:
+        return ToolResult("browser_screenshot", False, "", error=str(e))
+    except Exception as e:
+        return ToolResult("browser_screenshot", False, "",
+                          error=f"Ошибка скриншота: {e}")
+
+
+async def tool_browser_click(selector: str, **kwargs) -> ToolResult:
+    """Кликнуть по элементу."""
+    from pds_ultimate.core.browser_engine import browser_engine
+
+    try:
+        await browser_engine.click(selector, human_like=True)
+        # Ждём загрузку после клика
+        await asyncio.sleep(1.0)
+        info = await browser_engine.get_page_info()
+        return ToolResult(
+            "browser_click", True,
+            f"✅ Кликнул по '{selector}'. Текущая страница: {info.title}",
+            data={"url": info.url, "title": info.title},
+        )
+    except RuntimeError as e:
+        return ToolResult("browser_click", False, "", error=str(e))
+    except Exception as e:
+        return ToolResult("browser_click", False, "",
+                          error=f"Ошибка клика: {e}")
+
+
+async def tool_browser_fill(selector: str, value: str, **kwargs) -> ToolResult:
+    """Заполнить поле."""
+    from pds_ultimate.core.browser_engine import browser_engine
+
+    try:
+        await browser_engine.fill(selector, value, human_like=True)
+        return ToolResult(
+            "browser_fill", True,
+            f"✅ Заполнил '{selector}' значением: {value[:100]}",
+        )
+    except RuntimeError as e:
+        return ToolResult("browser_fill", False, "", error=str(e))
+    except Exception as e:
+        return ToolResult("browser_fill", False, "",
+                          error=f"Ошибка заполнения: {e}")
