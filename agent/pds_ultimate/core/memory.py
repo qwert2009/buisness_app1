@@ -653,3 +653,8 @@ class MemoryManager:
 # ─── Глобальный экземпляр ────────────────────────────────────────────────────
 
 memory_manager = MemoryManager()
+
+# ─── Backward Compatibility Bridge ──────────────────────────────────────────
+# Все новые модули должны использовать advanced_memory_manager,
+# но старый код (agent.py, tests, business_tools.py) использует memory_manager.
+# Оба экземпляра сосуществуют, advanced_memory_manager — основной.

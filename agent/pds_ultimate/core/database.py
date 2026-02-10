@@ -946,19 +946,20 @@ class UserAPIConfig(TimestampMixin, Base):
 
 class AgentMemory(TimestampMixin, Base):
     """
-    Долгосрочная память AI-агента.
+    Долгосрочная память AI-агента (Advanced Memory System).
 
     Хранит извлечённые факты, предпочтения, правила и инсайты.
     Используется для контекстного recall при обработке запросов.
 
-    Типы:
-    - fact: Конкретный факт
+    Типы памяти (5 + backward compat):
+    - episodic: Конкретные события, взаимодействия
+    - semantic: Обобщённые знания, концепции
+    - procedural: Как делать задачи, алгоритмы
+    - strategic: Стратегические решения, приоритеты
+    - failure: Ошибки и уроки (failure-driven learning)
+    - fact: Конкретный факт (backward compat)
     - preference: Предпочтение пользователя
     - rule: Бизнес-правило
-    - knowledge: Общее знание
-    - contact_info: Информация о контакте
-    - business_insight: Бизнес-инсайт
-    - episodic: Воспоминание о событии
     """
     __tablename__ = "agent_memory"
 
@@ -977,15 +978,62 @@ class AgentMemory(TimestampMixin, Base):
     last_accessed: Mapped[Optional[datetime]] = mapped_column(DateTime)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # ─── Advanced Memory Fields (Part 2) ─────────────────────────────────
+    confidence: Mapped[Optional[float]] = mapped_column(
+        Float, default=0.8)
+    decay_rate: Mapped[Optional[float]] = mapped_column(
+        Float, default=0.1)
+    source_quality: Mapped[Optional[float]] = mapped_column(
+        Float, default=0.7)
+    context_hash: Mapped[Optional[str]] = mapped_column(
+        String(32))  # MD5 hash для дедупликации
+    chat_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, index=True)  # Per-user memory isolation
+    expiry: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    success_count: Mapped[int] = mapped_column(Integer, default=0)
+
     __table_args__ = (
         Index("ix_agent_memory_type_imp", "memory_type", "importance"),
         Index("ix_agent_memory_active", "is_active"),
+        Index("ix_agent_memory_hash", "context_hash"),
+        Index("ix_agent_memory_chat", "chat_id", "memory_type"),
     )
 
     def __repr__(self) -> str:
         preview = self.content[:50] + \
             "..." if len(self.content) > 50 else self.content
         return f"<AgentMemory(id={self.id}, type='{self.memory_type}', imp={self.importance:.1f}, content='{preview}')>"
+
+
+class FailureLog(TimestampMixin, Base):
+    """
+    Лог ошибок агента (Failure-Driven Learning).
+
+    Хранит ошибки, причины и уроки. Агент учится на своих
+    неудачах и не повторяет одни и те же ошибки.
+    """
+    __tablename__ = "failure_log"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, index=True)
+    error_content: Mapped[str] = mapped_column(Text, nullable=False)
+    error_context: Mapped[Optional[str]] = mapped_column(Text)
+    root_cause: Mapped[Optional[str]] = mapped_column(Text)
+    correction: Mapped[Optional[str]] = mapped_column(Text)
+    lesson: Mapped[Optional[str]] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(
+        String(20), default="medium")  # low | medium | high | critical
+    tags: Mapped[Optional[str]] = mapped_column(Text)  # JSON array
+    is_resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    __table_args__ = (
+        Index("ix_failure_log_severity", "severity"),
+        Index("ix_failure_log_chat", "chat_id"),
+    )
 
 
 class AgentThought(TimestampMixin, Base):

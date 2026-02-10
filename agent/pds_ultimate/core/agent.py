@@ -34,6 +34,11 @@ import traceback
 from dataclasses import dataclass, field
 
 from pds_ultimate.config import config, logger
+from pds_ultimate.core.advanced_memory import AdvancedWorkingMemory
+from pds_ultimate.core.advanced_memory_manager import (
+    AdvancedMemoryManager,
+    advanced_memory_manager,
+)
 from pds_ultimate.core.memory import MemoryManager, WorkingMemory, memory_manager
 from pds_ultimate.core.tools import ToolRegistry, tool_registry
 
@@ -145,9 +150,11 @@ class Agent:
         self,
         tool_reg: ToolRegistry | None = None,
         mem_mgr: MemoryManager | None = None,
+        adv_mem: AdvancedMemoryManager | None = None,
     ):
         self._tools = tool_reg or tool_registry
         self._memory = mem_mgr or memory_manager
+        self._adv_memory = adv_mem or advanced_memory_manager
         self._llm = None  # Lazy init
 
     @property
@@ -183,12 +190,31 @@ class Agent:
         start_time = time.time()
         steps: list[AgentStep] = []
         tools_used: list[str] = []
-        working = self._memory.get_working(chat_id)
+
+        # Используем advanced working memory (с goal integrity, hypotheses)
+        working = self._adv_memory.get_working(chat_id)
         working.set_goal(message)
+
+        # Получаем контекст ошибок (failure-driven learning)
+        failure_ctx = ""
+        relevant_failures = self._adv_memory.get_relevant_failures(
+            message, limit=3)
+        if relevant_failures:
+            failure_lines = ["⚠️ УРОКИ ИЗ ПРОШЛЫХ ОШИБОК (НЕ ПОВТОРЯЙ):"]
+            for f in relevant_failures:
+                failure_lines.append(f"  • {f.content}")
+                if hasattr(f, 'correction') and f.correction:
+                    failure_lines.append(f"    → Правильно: {f.correction}")
+            failure_ctx = "\n".join(failure_lines)
+
+        # Time awareness
+        time_ctx = self._adv_memory.get_time_context()
 
         # Формируем system prompt
         system_prompt = self._build_system_prompt(
-            message, working, style_guide)
+            message, working, style_guide,
+            extra_context=f"{failure_ctx}\n\n{time_ctx}" if failure_ctx else time_ctx,
+        )
 
         # Начальные сообщения для LLM
         messages = self._build_messages(message, history, system_prompt)
@@ -335,6 +361,19 @@ class Agent:
                 )
                 step.observation = f"Внутренняя ошибка: {e}"
 
+                # Failure-driven learning: записываем ошибку
+                try:
+                    self._adv_memory.store_failure(
+                        content=f"Ошибка при обработке: {str(e)[:200]}",
+                        error_context=f"Запрос: {message[:100]}",
+                        correction="",
+                        severity="medium",
+                        tags=["agent_error", "runtime"],
+                        chat_id=chat_id,
+                    )
+                except Exception:
+                    pass  # Не блокируем основной поток
+
                 # Пытаемся восстановиться
                 messages.append({
                     "role": "user",
@@ -416,8 +455,17 @@ class Agent:
         Прямой ответ LLM без ReAct loop.
         Для простых вопросов и разговоров.
         """
-        # Подгружаем релевантную память
-        memory_ctx = self._memory.get_context_for_prompt(message)
+        # Подгружаем релевантную память (advanced first, then fallback)
+        memory_ctx = self._adv_memory.get_context_for_prompt(message)
+        if not memory_ctx:
+            memory_ctx = self._memory.get_context_for_prompt(message)
+
+        # Time awareness
+        time_ctx = self._adv_memory.get_time_context()
+        if memory_ctx:
+            memory_ctx = f"{memory_ctx}\n\n{time_ctx}"
+        else:
+            memory_ctx = time_ctx
 
         system = AGENT_SYSTEM_PROMPT.format(
             tools_description="[Инструменты не требуются для этого запроса]",
@@ -442,17 +490,27 @@ class Agent:
     def _build_system_prompt(
         self,
         message: str,
-        working: WorkingMemory,
+        working: WorkingMemory | AdvancedWorkingMemory,
         style_guide: str | None,
+        extra_context: str = "",
     ) -> str:
         """Построить system prompt с инструментами и контекстом."""
         tools_desc = self._tools.get_tools_prompt()
-        memory_ctx = self._memory.get_context_for_prompt(message)
+
+        # Используем advanced memory для контекста (если доступна)
+        memory_ctx = self._adv_memory.get_context_for_prompt(message)
+        if not memory_ctx:
+            memory_ctx = self._memory.get_context_for_prompt(message)
+
         working_ctx = working.get_context_summary()
 
         style_ctx = ""
         if style_guide:
             style_ctx = f"СТИЛЬ ОБЩЕНИЯ ВЛАДЕЛЬЦА:\n{style_guide}"
+
+        # Добавляем extra_context (failures, time awareness)
+        if extra_context:
+            memory_ctx = f"{memory_ctx}\n\n{extra_context}" if memory_ctx else extra_context
 
         return AGENT_SYSTEM_PROMPT.format(
             tools_description=tools_desc or "[Нет зарегистрированных инструментов]",
@@ -670,19 +728,32 @@ class Agent:
         self,
         dialogue: str,
         db_session=None,
+        chat_id: int | None = None,
     ) -> int:
         """
         Фоновое извлечение фактов из диалога и сохранение в память.
 
         Вызывается ПОСЛЕ отправки ответа пользователю (не блокирует).
+        Использует advanced memory manager для типизированных фактов.
         """
         try:
-            entries = await self._memory.extract_and_store_facts(dialogue, self.llm)
+            # Advanced memory — типизированное извлечение фактов
+            entries = await self._adv_memory.extract_and_store_facts(
+                dialogue, self.llm, chat_id=chat_id,
+            )
+
+            # Также обновляем старую память для backward compat
+            old_entries = await self._memory.extract_and_store_facts(
+                dialogue, self.llm
+            )
 
             if entries and db_session:
+                self._adv_memory.save_to_db(db_session)
+
+            if old_entries and db_session:
                 self._memory.save_to_db(db_session)
 
-            return len(entries)
+            return len(entries) + len(old_entries)
         except Exception as e:
             logger.warning(f"Background memory extraction error: {e}")
             return 0

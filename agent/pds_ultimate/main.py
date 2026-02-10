@@ -59,6 +59,7 @@ async def main():
 
     # ─── 3.5. Инициализация AI Agent System ─────────────────────────────
     logger.info("[3.5/7] Инициализация AI Agent (ReAct + Tools + Memory)...")
+    from pds_ultimate.core.advanced_memory_manager import advanced_memory_manager
     from pds_ultimate.core.business_tools import register_all_tools
     from pds_ultimate.core.memory import memory_manager
 
@@ -66,13 +67,22 @@ async def main():
     tools_count = register_all_tools()
     logger.info(f"  🔧 Зарегистрировано {tools_count} инструментов")
 
-    # Загружаем долгосрочную память из БД
+    # Загружаем долгосрочную память из БД (оба менеджера)
     with session_factory() as mem_session:
         mem_count = memory_manager.load_from_db(mem_session)
-        logger.info(f"  🧠 Загружено {mem_count} записей памяти")
+        logger.info(f"  🧠 Загружено {mem_count} записей памяти (basic)")
+        adv_count = advanced_memory_manager.load_from_db(mem_session)
+        logger.info(f"  🧠 Загружено {adv_count} записей памяти (advanced)")
 
     # Инициализация multi-user системы
     logger.info("  👥 User Manager: готов к работе")
+
+    # Memory stats
+    stats = advanced_memory_manager.get_stats()
+    logger.info(
+        f"  📊 Advanced Memory: {stats['total']} записей, "
+        f"types={stats['by_type']}, failures={stats['failures_stored']}"
+    )
 
     logger.info("  ✅ AI Agent System инициализирована")
 
@@ -200,12 +210,22 @@ async def main():
         # ─── Cleanup ─────────────────────────────────────────────────────
         logger.info("Остановка системы...")
 
-        # Сохраняем память агента
+        # Сохраняем память агента (оба менеджера)
         try:
             with session_factory() as save_session:
                 saved = memory_manager.save_to_db(save_session)
                 if saved:
-                    logger.info(f"  💾 Сохранено {saved} записей памяти")
+                    logger.info(
+                        f"  💾 Сохранено {saved} записей памяти (basic)")
+                adv_saved = advanced_memory_manager.save_to_db(save_session)
+                if adv_saved:
+                    logger.info(
+                        f"  💾 Сохранено {adv_saved} записей памяти (advanced)")
+                # Pruning before shutdown
+                pruned = advanced_memory_manager.prune()
+                if pruned:
+                    logger.info(
+                        f"  🗑️ Pruned {pruned} устаревших записей памяти")
         except Exception as e:
             logger.warning(f"  ⚠ Ошибка сохранения памяти: {e}")
 
