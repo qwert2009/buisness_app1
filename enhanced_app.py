@@ -414,12 +414,12 @@ def init_enhanced_db():
     ''')
     
     # Добавляем админ пользователя
-    cursor.execute('SELECT * FROM users WHERE email = ?', ('alexkurumbayev@gmail.com',))
+    cursor.execute('SELECT * FROM users WHERE email = ?', ('admin@example.com',))
     if cursor.fetchone() is None:
-        admin_password_hash = hashlib.sha256('qwerty123G'.encode()).hexdigest()
+        admin_password_hash = hashlib.sha256('ChangeMe123!'.encode()).hexdigest()
         cursor.execute(
             "INSERT INTO users (email, password_hash, full_name, is_admin, premium_status) VALUES (?, ?, ?, ?, ?)",
-            ('alexkurumbayev@gmail.com', admin_password_hash, 'Alex Kurumbayev', True, True)
+            ('admin@example.com', admin_password_hash, 'System Administrator', True, True)
         )
         conn.commit()
     

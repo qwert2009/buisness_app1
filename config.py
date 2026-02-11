@@ -121,8 +121,8 @@ def get_config():
 
 # Настройки администратора по умолчанию
 DEFAULT_ADMIN = {
-    'email': 'alexkurumbayev@gmail.com',
-    'password': 'qwerty123G',
+    'email': 'admin@example.com',
+    'password': 'ChangeMe123!',
     'full_name': 'Администратор системы',
     'is_admin': True,
     'premium_status': True

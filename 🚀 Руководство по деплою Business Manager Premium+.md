@@ -37,8 +37,8 @@ export OPENAI_API_BASE="https://api.openai.com/v1"
 ```
 
 #### Администратор по умолчанию
-- **Email:** alexkurumbayev@gmail.com
-- **Пароль:** qwerty123G
+- **Email:** admin@example.com
+- **Пароль:** ChangeMe123!
 - **⚠️ Обязательно смените пароль после первого входа!**
 
 ### Опциональные настройки

@@ -422,10 +422,10 @@ import streamlit_authenticator as stauth
 users_config = {
     'credentials': {
         'usernames': {
-            'alexkurumbayev@gmail.com': {
-                'email': 'alexkurumbayev@gmail.com',
-                'name': 'Alex Kurumbayev',
-                'password': stauth.Hasher(['qwerty123G']).generate()[0],
+            'admin@example.com': {
+                'email': 'admin@example.com',
+                'name': 'System Administrator',
+                'password': stauth.Hasher(['ChangeMe123!']).generate()[0],
                 'role': 'admin',
             },
         }
@@ -436,7 +436,7 @@ users_config = {
         'name': 'streamlit_auth',
     },
     'preauthorized': {
-        'emails': ["alexkurumbayev@gmail.com"]
+        'emails': ["admin@example.com"]
     }
 }
 
@@ -1048,16 +1048,16 @@ def init_db():
         conn.commit()
         st.success("Администратор добавлен: admin@company.com / adminpass")
    
-    # Добавляем пользователя alexkurumbayev@gmail.com, если его нет
-    cursor.execute('SELECT * FROM users WHERE email = ?', ('alexkurumbayev@gmail.com',))
+    # Добавляем пользователя admin@example.com, если его нет
+    cursor.execute('SELECT * FROM users WHERE email = ?', ('admin@example.com',))
     if cursor.fetchone() is None:
-        user_password_hash = stauth.Hasher(['qwerty123G']).generate()[0]
+        user_password_hash = stauth.Hasher(['ChangeMe123!']).generate()[0]
         cursor.execute(
             "INSERT INTO users (email, password_hash, full_name, is_admin, premium_status) VALUES (?, ?, ?, ?, ?)",
-            ('alexkurumbayev@gmail.com', user_password_hash, 'Alex Kurumbayev', True, True)
+            ('admin@example.com', user_password_hash, 'System Administrator', True, True)
         )
         conn.commit()
-        st.success("Пользователь добавлен: alexkurumbayev@gmail.com / qwerty123G")
+        st.success("Пользователь добавлен: admin@example.com / ChangeMe123!")
 
     conn.commit()
     conn.close()
