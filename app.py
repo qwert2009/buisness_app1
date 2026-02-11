@@ -1057,7 +1057,7 @@ def init_db():
             ('admin@example.com', user_password_hash, 'System Administrator', True, True)
         )
         conn.commit()
-        st.success("Пользователь добавлен: admin@example.com / ChangeMe123!")
+        st.success("Пользователь администратора создан: admin@example.com")
 
     conn.commit()
     conn.close()
