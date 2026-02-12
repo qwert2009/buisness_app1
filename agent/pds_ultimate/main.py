@@ -60,6 +60,7 @@ async def main():
     # ─── 3.5. Инициализация AI Agent System ─────────────────────────────
     logger.info("[3.5/7] Инициализация AI Agent (ReAct + Tools + Memory)...")
     from pds_ultimate.core.advanced_memory_manager import advanced_memory_manager
+    from pds_ultimate.core.browser_engine import browser_engine
     from pds_ultimate.core.business_tools import register_all_tools
     from pds_ultimate.core.cognitive_engine import cognitive_engine
     from pds_ultimate.core.memory import memory_manager
@@ -74,6 +75,12 @@ async def main():
         logger.info("  🌐 Browser Engine запущен")
     except Exception as e:
         logger.warning(f"  ⚠ Browser Engine: {e} (работа без браузера)")
+
+    # Internet Reasoning Engine (использует Browser Engine)
+    logger.info(
+        "  🔬 Internet Reasoning Engine: готов "
+        f"(trust domains: {len(reasoning_engine.trust_scorer._domain_scores)})"
+    )
 
     # Загружаем долгосрочную память из БД (оба менеджера)
     with session_factory() as mem_session:

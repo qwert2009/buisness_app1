@@ -914,6 +914,57 @@ def register_all_tools() -> int:
             handler=tool_browser_fill,
             category="browser",
         ),
+
+        # ─── Исследование (Internet Reasoning) ──────────────────────
+        Tool(
+            name="research",
+            description=(
+                "Исследовать вопрос с проверкой множества источников. "
+                "Ищет в интернете, извлекает факты, оценивает достоверность, "
+                "обнаруживает противоречия и синтезирует ответ. "
+                "Используй для проверки фактов, сравнения цен, "
+                "анализа рынка, поиска информации."
+            ),
+            parameters=[
+                ToolParameter("query", "string",
+                              "Вопрос для исследования", True),
+                ToolParameter("max_sources", "number",
+                              "Максимум источников (1-10)", False, 5),
+            ],
+            handler=tool_research,
+            category="research",
+        ),
+        Tool(
+            name="deep_research",
+            description=(
+                "Глубокое исследование с максимальным покрытием. "
+                "Расширяет запросы, анализирует до 10 источников, "
+                "извлекает больше фактов. Для сложных вопросов, "
+                "где нужна проверка из множества независимых источников."
+            ),
+            parameters=[
+                ToolParameter("query", "string",
+                              "Вопрос для глубокого исследования", True),
+                ToolParameter("max_sources", "number",
+                              "Максимум источников (1-15)", False, 10),
+            ],
+            handler=tool_deep_research,
+            category="research",
+        ),
+        Tool(
+            name="quick_search",
+            description=(
+                "Быстрый поиск с анализом — без расширения запросов. "
+                "Для простых вопросов, когда нужен быстрый ответ "
+                "с оценкой достоверности."
+            ),
+            parameters=[
+                ToolParameter("query", "string",
+                              "Поисковый запрос", True),
+            ],
+            handler=tool_quick_search,
+            category="research",
+        ),
     ]
 
     for tool in tools:
@@ -1051,3 +1102,122 @@ async def tool_browser_fill(selector: str, value: str, **kwargs) -> ToolResult:
     except Exception as e:
         return ToolResult("browser_fill", False, "",
                           error=f"Ошибка заполнения: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RESEARCH TOOLS (handlers) — Internet Reasoning
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_research(
+    query: str,
+    max_sources: int = 5,
+    **kwargs,
+) -> ToolResult:
+    """
+    Исследовать вопрос с проверкой множества источников.
+    Использует Internet Reasoning Engine: поиск, анализ,
+    извлечение фактов, обнаружение противоречий, синтез ответа.
+    """
+    from pds_ultimate.core.internet_reasoning import reasoning_engine
+
+    try:
+        answer = await reasoning_engine.research(
+            query=query,
+            max_sources=int(max_sources),
+            expand_queries=True,
+        )
+
+        lines = [answer.summary]
+        lines.append(f"\n📊 Уверенность: {answer.confidence:.0%}")
+        lines.append(f"📖 Источников: {answer.sources_count}")
+        lines.append(f"🏷️ Качество: {answer.quality_label}")
+
+        if answer.has_contradictions:
+            lines.append(
+                f"⚠️ Противоречий: {len(answer.contradictions)}"
+            )
+
+        return ToolResult(
+            "research", True, "\n".join(lines),
+            data=answer.to_dict(),
+        )
+    except Exception as e:
+        return ToolResult(
+            "research", False, "",
+            error=f"Ошибка исследования: {e}",
+        )
+
+
+async def tool_deep_research(
+    query: str,
+    max_sources: int = 10,
+    **kwargs,
+) -> ToolResult:
+    """
+    Глубокое исследование с расширенным покрытием источников.
+    Для сложных вопросов, где нужна проверка из множества
+    независимых источников.
+    """
+    from pds_ultimate.core.internet_reasoning import reasoning_engine
+
+    try:
+        answer = await reasoning_engine.deep_research(
+            query=query,
+            max_sources=int(max_sources),
+        )
+
+        lines = [answer.summary]
+        lines.append(f"\n📊 Уверенность: {answer.confidence:.0%}")
+        lines.append(f"📖 Источников: {answer.sources_count}")
+        lines.append(f"🔬 Фактов проанализировано: {len(answer.facts)}")
+        lines.append(f"🏷️ Качество: {answer.quality_label}")
+
+        if answer.has_contradictions:
+            lines.append(
+                f"⚠️ Противоречий: {len(answer.contradictions)}"
+            )
+
+        stats = reasoning_engine.get_stats()
+        lines.append(
+            f"\n📈 Статистика: {stats['queries']} запросов, "
+            f"{stats['pages']} стр, {stats['time_ms']}мс"
+        )
+
+        return ToolResult(
+            "deep_research", True, "\n".join(lines),
+            data=answer.to_dict(),
+        )
+    except Exception as e:
+        return ToolResult(
+            "deep_research", False, "",
+            error=f"Ошибка глубокого исследования: {e}",
+        )
+
+
+async def tool_quick_search(
+    query: str,
+    **kwargs,
+) -> ToolResult:
+    """
+    Быстрый поиск без расширения запросов.
+    Для простых вопросов, когда нужен быстрый ответ.
+    """
+    from pds_ultimate.core.internet_reasoning import reasoning_engine
+
+    try:
+        answer = await reasoning_engine.quick_search(query=query)
+
+        lines = [answer.summary]
+        lines.append(f"\n📊 Уверенность: {answer.confidence:.0%}")
+        lines.append(f"📖 Источников: {answer.sources_count}")
+
+        return ToolResult(
+            "quick_search", True, "\n".join(lines),
+            data=answer.to_dict(),
+        )
+    except Exception as e:
+        return ToolResult(
+            "quick_search", False, "",
+            error=f"Ошибка быстрого поиска: {e}",
+        )
