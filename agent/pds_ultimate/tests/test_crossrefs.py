@@ -119,6 +119,8 @@ class TestModuleExports:
             "WhatsAppClient", "wa_client",
             "GmailClient", "gmail_client",
             "TelethonClient", "telethon_client",
+            "ExchangeRateService", "exchange_service",
+            "GoogleCalendarService", "google_calendar",
         }
         assert expected == set(__all__)
 

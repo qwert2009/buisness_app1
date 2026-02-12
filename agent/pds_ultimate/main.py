@@ -216,6 +216,16 @@ async def main():
 
     file_manager = FileManager(session_factory)
 
+    # Part 7: File Engines
+
+    # Part 7: Executive Tools
+
+    # Part 7: Business Integrations
+
+    logger.info("  📄 File Engines: Excel, PDF, OCR, Converter — готовы")
+    logger.info("  🧾 Executive: Receipt Scanner, Translator, Archivist — готовы")
+    logger.info("  💱 Integrations: Exchange Rates, Google Calendar — готовы")
+
     logger.info("  ✅ Все модули инициализированы")
 
     # ─── 6. Запуск Telegram Bot ──────────────────────────────────────────

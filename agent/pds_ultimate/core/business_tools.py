@@ -647,6 +647,323 @@ def _convert_to_usd(amount: float, currency: str) -> float:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# PART 7: NEW TOOL HANDLERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_exchange_rates(
+    from_currency: str = "USD",
+    to_currency: str = "",
+    amount: float = 1.0,
+    **kwargs,
+) -> ToolResult:
+    """Получить курс обмена валют (онлайн + кэш + фиксированные)."""
+    from pds_ultimate.integrations.exchange_rates import exchange_service
+
+    try:
+        if to_currency:
+            result = await exchange_service.convert(
+                amount, from_currency.upper(), to_currency.upper()
+            )
+            if "error" in result:
+                return ToolResult(
+                    "exchange_rates", False, "",
+                    error=result["error"],
+                )
+            return ToolResult(
+                "exchange_rates", True,
+                f"💱 {amount:.2f} {from_currency.upper()} = "
+                f"{result['result']:.2f} {to_currency.upper()}\n"
+                f"Курс: {result['rate']:.4f} "
+                f"(источник: {result.get('source', 'unknown')})",
+                data=result,
+            )
+
+        result = await exchange_service.refresh_all()
+        table = exchange_service.format_rates_table()
+        return ToolResult(
+            "exchange_rates", True, table,
+            data={"rates_count": len(result.rates)},
+        )
+
+    except Exception as e:
+        return ToolResult(
+            "exchange_rates", False, "",
+            error=f"Ошибка получения курсов: {e}",
+        )
+
+
+async def tool_ocr_recognize(
+    file_path: str,
+    extract_amounts: bool = False,
+    extract_tracking: bool = False,
+    **kwargs,
+) -> ToolResult:
+    """Распознать текст на изображении (OCR)."""
+    from pds_ultimate.modules.files.ocr_engine import ocr_engine
+
+    try:
+        result = await ocr_engine.recognize(file_path)
+        lines = [f"📝 OCR ({result.engine_used})"]
+        lines.append(f"Уверенность: {result.avg_confidence:.0%}")
+        lines.append(f"\n{result.confident_text[:2000]}")
+
+        data = {"text": result.confident_text,
+                "confidence": result.avg_confidence}
+
+        if extract_amounts:
+            amounts = await ocr_engine.extract_amounts(file_path)
+            if amounts:
+                lines.append("\n💰 Суммы:")
+                for a in amounts:
+                    lines.append(f"  {a.original} → {a.amount} {a.currency}")
+                data["amounts"] = [
+                    {"amount": a.amount, "currency": a.currency}
+                    for a in amounts
+                ]
+
+        if extract_tracking:
+            tracking = await ocr_engine.extract_tracking_numbers(file_path)
+            if tracking:
+                lines.append("\n📦 Трекинг:")
+                for t in tracking:
+                    lines.append(f"  {t.number} ({t.carrier})")
+                data["tracking"] = [
+                    {"number": t.number, "carrier": t.carrier}
+                    for t in tracking
+                ]
+
+        return ToolResult(
+            "ocr_recognize", True, "\n".join(lines), data=data,
+        )
+
+    except Exception as e:
+        return ToolResult(
+            "ocr_recognize", False, "",
+            error=f"Ошибка OCR: {e}",
+        )
+
+
+async def tool_scan_receipt(
+    file_path: str,
+    save_to_db: bool = True,
+    db_session=None,
+    **kwargs,
+) -> ToolResult:
+    """Сканировать чек и распознать расходы."""
+    from pds_ultimate.modules.executive.receipt_scanner import receipt_scanner
+
+    try:
+        receipt = await receipt_scanner.scan_receipt(file_path)
+        text = receipt_scanner.format_receipt(receipt)
+
+        if save_to_db and db_session and receipt.amount:
+            saved = await receipt_scanner.save_expense(
+                receipt, db_session
+            )
+            if saved:
+                text += "\n\n💾 Сохранено в базу расходов"
+
+        return ToolResult(
+            "scan_receipt", True, text,
+            data={
+                "amount": receipt.amount,
+                "currency": receipt.currency,
+                "category": receipt.category.value if receipt.category else None,
+                "vendor": receipt.vendor,
+            },
+        )
+
+    except Exception as e:
+        return ToolResult(
+            "scan_receipt", False, "",
+            error=f"Ошибка сканирования чека: {e}",
+        )
+
+
+async def tool_translate_text(
+    text: str,
+    target_lang: str = "ru",
+    source_lang: str = "",
+    **kwargs,
+) -> ToolResult:
+    """Перевести текст через TranslatorService (с бизнес-глоссарием)."""
+    from pds_ultimate.modules.executive.translator import translator
+
+    try:
+        result = await translator.translate(
+            text, target_lang, source_lang or None,
+        )
+        formatted = translator.format_translation(result)
+        return ToolResult(
+            "translate_text", True, formatted,
+            data={
+                "source_lang": result.source_lang,
+                "target_lang": result.target_lang,
+                "translated": result.translated,
+            },
+        )
+
+    except Exception as e:
+        return ToolResult(
+            "translate_text", False, "",
+            error=f"Ошибка перевода: {e}",
+        )
+
+
+async def tool_archivist_rename(
+    file_path: str,
+    description: str = "",
+    **kwargs,
+) -> ToolResult:
+    """Стандартизировать имя файла по корпоративному стандарту."""
+    from pds_ultimate.modules.executive.archivist import archivist
+
+    try:
+        result = archivist.rename_file(file_path, context=description)
+        text = archivist.format_rename_result(result)
+
+        if not result.success:
+            return ToolResult(
+                "archivist_rename", False, text,
+                data=result.to_dict(),
+                error=result.error or "Не удалось переименовать",
+            )
+
+        return ToolResult(
+            "archivist_rename", True, text,
+            data=result.to_dict(),
+        )
+
+    except Exception as e:
+        return ToolResult(
+            "archivist_rename", False, "",
+            error=f"Ошибка переименования: {e}",
+        )
+
+
+async def tool_convert_file(
+    file_path: str,
+    target_format: str,
+    **kwargs,
+) -> ToolResult:
+    """Конвертировать файл в другой формат."""
+    from pds_ultimate.modules.files.converter import file_converter
+
+    try:
+        result = await file_converter.convert(file_path, target_format)
+        text = file_converter.format_result(result)
+
+        if result.success:
+            return ToolResult(
+                "convert_file", True, text,
+                data=result.to_dict(),
+            )
+        return ToolResult(
+            "convert_file", False, "",
+            error=text,
+        )
+
+    except Exception as e:
+        return ToolResult(
+            "convert_file", False, "",
+            error=f"Ошибка конвертации: {e}",
+        )
+
+
+async def tool_google_calendar_events(
+    action: str = "today",
+    title: str = "",
+    start_time: str = "",
+    end_time: str = "",
+    description: str = "",
+    **kwargs,
+) -> ToolResult:
+    """Работа с Google Calendar (создать/просмотреть события)."""
+    from pds_ultimate.integrations.google_calendar import google_calendar
+
+    try:
+        if action == "today":
+            events = await google_calendar.get_today_events()
+            text = google_calendar.format_day_summary(events)
+            return ToolResult(
+                "google_calendar", True, text,
+                data={"events_count": len(events)},
+            )
+
+        elif action == "create":
+            from datetime import datetime
+
+            if not title or not start_time:
+                return ToolResult(
+                    "google_calendar", False, "",
+                    error="Для создания нужны title и start_time",
+                )
+
+            # Parse dates
+            from pds_ultimate.utils.validators import parse_date
+            start_dt = parse_date(start_time)
+            end_dt = parse_date(end_time) if end_time else None
+            if not start_dt:
+                return ToolResult(
+                    "google_calendar", False, "",
+                    error=f"Не распознан формат даты: {start_time}",
+                )
+
+            created = await google_calendar.create_event(
+                summary=title,
+                start=start_dt,
+                end=end_dt,
+                description=description,
+            )
+            if created:
+                return ToolResult(
+                    "google_calendar", True,
+                    f"📅 Событие создано: «{title}»",
+                    data={"event_id": created.id},
+                )
+            return ToolResult(
+                "google_calendar", False, "",
+                error="Не удалось создать событие",
+            )
+
+        elif action == "free_slots":
+            from datetime import datetime
+
+            from pds_ultimate.utils.validators import parse_date
+            dt = parse_date(start_time) if start_time else datetime.now()
+            ref_date = dt or datetime.now()
+
+            # Get today's events first, then find free slots (sync method)
+            events = await google_calendar.get_events(
+                ref_date.replace(hour=0, minute=0, second=0, microsecond=0),
+            )
+            slots = google_calendar.find_free_slots(
+                events, reference_date=ref_date,
+            )
+            if slots:
+                text = google_calendar.format_free_slots(slots)
+                return ToolResult(
+                    "google_calendar", True, text,
+                    data={"slots_count": len(slots)},
+                )
+            return ToolResult(
+                "google_calendar", True, "Нет свободных слотов на эту дату.",
+            )
+
+        return ToolResult(
+            "google_calendar", False, "",
+            error=f"Неизвестное действие: {action}",
+        )
+
+    except Exception as e:
+        return ToolResult(
+            "google_calendar", False, "",
+            error=f"Ошибка Google Calendar: {e}",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # РЕГИСТРАЦИЯ ВСЕХ TOOLS
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -964,6 +1281,134 @@ def register_all_tools() -> int:
             ],
             handler=tool_quick_search,
             category="research",
+        ),
+
+        # ─── Part 7: Бизнес-интеграции ──────────────────────────────
+        Tool(
+            name="exchange_rates",
+            description=(
+                "Получить актуальный курс обмена валют. "
+                "Онлайн-курсы + фиксированные (TMT, CNY). "
+                "Можно конвертировать сумму между валютами."
+            ),
+            parameters=[
+                ToolParameter("from_currency", "string",
+                              "Из какой валюты (USD/CNY/TMT/EUR)", False, "USD"),
+                ToolParameter("to_currency", "string",
+                              "В какую валюту (если пусто — все курсы)", False),
+                ToolParameter("amount", "number",
+                              "Сумма для конвертации", False, 1.0),
+            ],
+            handler=tool_exchange_rates,
+            category="finance",
+        ),
+        Tool(
+            name="google_calendar",
+            description=(
+                "Работа с Google Calendar: просмотр событий на сегодня, "
+                "создание новых событий, поиск свободных слотов."
+            ),
+            parameters=[
+                ToolParameter("action", "string",
+                              "Действие: today/create/free_slots", False, "today"),
+                ToolParameter("title", "string",
+                              "Название события (для create)", False),
+                ToolParameter("start_time", "string",
+                              "Начало (YYYY-MM-DD HH:MM)", False),
+                ToolParameter("end_time", "string",
+                              "Конец (YYYY-MM-DD HH:MM)", False),
+                ToolParameter("description", "string",
+                              "Описание события", False),
+            ],
+            handler=tool_google_calendar_events,
+            category="calendar",
+        ),
+
+        # ─── Part 7: Файловые движки ────────────────────────────────
+        Tool(
+            name="ocr_recognize",
+            description=(
+                "Распознать текст на изображении (OCR). "
+                "Поддержка: фото чеков, накладных, документов. "
+                "Языки: RU, EN, ZH. Может извлечь суммы и трекинг-номера."
+            ),
+            parameters=[
+                ToolParameter("file_path", "string",
+                              "Путь к файлу изображения", True),
+                ToolParameter("extract_amounts", "boolean",
+                              "Извлечь денежные суммы", False, False),
+                ToolParameter("extract_tracking", "boolean",
+                              "Извлечь трекинг-номера", False, False),
+            ],
+            handler=tool_ocr_recognize,
+            category="files",
+        ),
+        Tool(
+            name="convert_file",
+            description=(
+                "Конвертировать файл в другой формат. "
+                "Поддержка: xlsx↔csv, docx→pdf, pdf→txt, json→csv и другие."
+            ),
+            parameters=[
+                ToolParameter("file_path", "string",
+                              "Путь к исходному файлу", True),
+                ToolParameter("target_format", "string",
+                              "Целевой формат (csv/pdf/xlsx/txt/json)", True),
+            ],
+            handler=tool_convert_file,
+            category="files",
+        ),
+
+        # ─── Part 7: Исполнительные инструменты ─────────────────────
+        Tool(
+            name="scan_receipt",
+            description=(
+                "Сканировать чек/квитанцию: OCR + распознавание "
+                "позиций, итога, категории расхода. "
+                "Автоматически сохраняет в базу расходов."
+            ),
+            parameters=[
+                ToolParameter("file_path", "string",
+                              "Путь к фото чека", True),
+                ToolParameter("save_to_db", "boolean",
+                              "Сохранить в базу расходов", False, True),
+            ],
+            handler=tool_scan_receipt,
+            category="finance",
+            needs_db=True,
+        ),
+        Tool(
+            name="translate_text",
+            description=(
+                "Перевести текст с бизнес-глоссарием. "
+                "Автоопределение языка. "
+                "Поддержка: RU, EN, ZH, TK, TR, AR, FA, DE, FR, ES, IT, PT."
+            ),
+            parameters=[
+                ToolParameter("text", "string", "Текст для перевода", True),
+                ToolParameter("target_lang", "string",
+                              "Целевой язык (ru/en/zh/tk)", False, "ru"),
+                ToolParameter("source_lang", "string",
+                              "Исходный язык (авто если пусто)", False),
+            ],
+            handler=tool_translate_text,
+            category="text",
+        ),
+        Tool(
+            name="archivist_rename",
+            description=(
+                "Стандартизировать имя файла по корпоративному стандарту. "
+                "Формат: YYYY_MM_DD_Category_Description.ext. "
+                "Автоопределение категории из содержимого."
+            ),
+            parameters=[
+                ToolParameter("file_path", "string",
+                              "Путь к файлу", True),
+                ToolParameter("description", "string",
+                              "Описание файла (опционально)", False),
+            ],
+            handler=tool_archivist_rename,
+            category="files",
         ),
     ]
 

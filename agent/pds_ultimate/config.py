@@ -81,6 +81,10 @@ BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
 USER_FILES_DIR = DATA_DIR / "user_files"
 USER_FILES_DIR.mkdir(parents=True, exist_ok=True)
 
+# Credentials (OAuth tokens, service accounts)
+CREDENTIALS_DIR = BASE_DIR / "credentials"
+CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
+
 # Ключевые файлы
 DATABASE_PATH = DATA_DIR / "pds_ultimate.db"
 MASTER_FINANCE_PATH = DATA_DIR / "Master_Finance.xlsx"
