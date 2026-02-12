@@ -82,6 +82,25 @@ async def main():
         f"(trust domains: {len(reasoning_engine.trust_scorer._domain_scores)})"
     )
 
+    # Part 6: Новые движки
+    from pds_ultimate.core.parallel_engine import parallel_engine
+    from pds_ultimate.core.performance_engine import performance_engine
+    from pds_ultimate.core.semantic_engine import semantic_engine
+
+    logger.info("  💖 Emotional Intelligence Engine: готов")
+    logger.info(
+        f"  ⚡ Performance Engine: cache_max={performance_engine.cache._max_size}, "
+        f"dedup={performance_engine.deduplicator is not None}"
+    )
+    logger.info(
+        f"  🔀 Parallel Engine: "
+        f"categories={list(parallel_engine.concurrency.limits.keys())}"
+    )
+    logger.info(
+        f"  🔍 Semantic Engine: "
+        f"index_size={semantic_engine.index.stats().total_documents}"
+    )
+
     # Загружаем долгосрочную память из БД (оба менеджера)
     with session_factory() as mem_session:
         mem_count = memory_manager.load_from_db(mem_session)
