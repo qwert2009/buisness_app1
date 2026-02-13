@@ -17,6 +17,9 @@ from pds_ultimate.core.context_compressor import ContextCompressorV2, context_co
 from pds_ultimate.core.crm_engine import CRMEngine, crm_engine
 from pds_ultimate.core.database import Base, init_database
 from pds_ultimate.core.evening_digest import EveningDigestEngine, evening_digest
+
+# Part 11
+from pds_ultimate.core.integration_layer import IntegrationLayer, integration_layer
 from pds_ultimate.core.llm_engine import LLMEngine, llm_engine
 from pds_ultimate.core.memory_v2 import MemoryV2Engine, memory_v2
 
@@ -72,4 +75,7 @@ __all__ = [
     "context_compressor",
     "TimeRelevanceEngine",
     "time_relevance",
+    # Part 11
+    "IntegrationLayer",
+    "integration_layer",
 ]

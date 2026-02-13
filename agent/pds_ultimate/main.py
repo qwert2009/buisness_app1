@@ -202,7 +202,7 @@ async def main():
     ss_stats = semantic_search_v2.get_stats()
     logger.info(
         f"  🔍 Semantic Search V2: "
-        f"kb={ss_stats['knowledge_base']['size']}, "
+        f"kb={ss_stats['knowledge_base']['total']}, "
         f"docs={ss_stats['document_store']['documents']}"
     )
     ct_stats = confidence_tracker.get_stats()
@@ -230,6 +230,17 @@ async def main():
     logger.info(
         f"  ⏱️ Time Relevance: "
         f"sources={tr_stats['sources']['count']}"
+    )
+
+    # Part 11: Integration Layer — pipelines, retry, circuit breaker
+    from pds_ultimate.core.integration_layer import integration_layer
+
+    il_stats = integration_layer.get_stats()
+    logger.info(
+        f"  🔗 Integration Layer: "
+        f"chains={il_stats.get('chains', 0)}, "
+        f"breakers={il_stats.get('circuit_breakers', 0)}, "
+        f"fallbacks={il_stats.get('fallbacks', 0)}"
     )
 
     # ─── 4. Запуск интеграций ────────────────────────────────────────────

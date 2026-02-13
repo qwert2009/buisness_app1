@@ -23,12 +23,12 @@ class TestPart10ToolRegistration:
     """Тест регистрации Part 10 инструментов."""
 
     def test_total_tool_count(self):
-        """Всего 56 инструментов (46 Part 1-9 + 10 Part 10)."""
+        """Всего 60 инструментов (46 Part 1-9 + 10 Part 10 + 4 Part 11)."""
         from pds_ultimate.core.business_tools import register_all_tools
 
         tool_registry._tools.clear()
         count = register_all_tools()
-        assert count == 56, f"Ожидалось 56, получено {count}"
+        assert count == 60, f"Ожидалось 60, получено {count}"
 
     def test_part10_tools_registered(self):
         """Все Part 10 tools зарегистрированы."""

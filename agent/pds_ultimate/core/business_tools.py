@@ -1860,6 +1860,61 @@ def register_all_tools() -> int:
             handler=tool_time_decay,
             category="analysis",
         ),
+
+        # ─── Part 11: Integration Layer ─────────────────────────────
+        Tool(
+            name="run_chain",
+            description=(
+                "Запустить цепочку инструментов. Цепочки объединяют "
+                "несколько tools в pipeline с передачей данных между шагами."
+            ),
+            parameters=[
+                ToolParameter("chain_name", "string",
+                              "Имя цепочки (research_summarize, confidence_check_search, "
+                              "freshness_update, finance_report)", True),
+                ToolParameter("query", "string",
+                              "Входной запрос / данные", False, ""),
+            ],
+            handler=tool_run_chain,
+            category="integration",
+        ),
+        Tool(
+            name="tool_health",
+            description=(
+                "Показать здоровье инструментов: какие работают, "
+                "какие деградируют, какие отключены circuit breaker."
+            ),
+            parameters=[
+                ToolParameter("action", "string",
+                              "Действие: report/unhealthy/slow/stats",
+                              False, "report"),
+            ],
+            handler=tool_health_check,
+            category="integration",
+        ),
+        Tool(
+            name="parallel_tools",
+            description=(
+                "Выполнить несколько инструментов параллельно. "
+                "Принимает список вызовов и возвращает все результаты."
+            ),
+            parameters=[
+                ToolParameter("calls", "string",
+                              "Вызовы в формате: tool1:param1=val1;tool2:param2=val2",
+                              True),
+            ],
+            handler=tool_parallel_execute,
+            category="integration",
+        ),
+        Tool(
+            name="list_chains",
+            description=(
+                "Показать все доступные цепочки инструментов."
+            ),
+            parameters=[],
+            handler=tool_list_chains,
+            category="integration",
+        ),
     ]
 
     for tool in tools:
@@ -3332,4 +3387,185 @@ async def tool_time_decay(
         return ToolResult(
             "time_decay", False, "",
             error=f"Ошибка затухания: {e}",
+        )
+
+
+# ── Part 11: Integration Layer handlers ──────────────────────────────
+
+async def tool_run_chain(
+    chain_name: str,
+    query: str = "",
+    **kwargs,
+) -> ToolResult:
+    """Запустить цепочку инструментов."""
+    from pds_ultimate.core.integration_layer import integration_layer
+
+    try:
+        result = await integration_layer.execute_chain(
+            chain_name, {"query": query} if query else {},
+        )
+        if result is None:
+            return ToolResult(
+                "run_chain", False, "",
+                error=f"Цепочка '{chain_name}' не найдена. "
+                "Используйте list_chains для списка.",
+            )
+        lines = [
+            f"🔗 Цепочка: {chain_name}",
+            f"  📊 Статус: {result.status.value}",
+            f"  ⏱️ Время: {result.total_time:.2f}с",
+            f"  📋 Шагов: {len(result.step_results)}",
+        ]
+        for i, sr in enumerate(result.step_results, 1):
+            icon = "✅" if sr.success else "❌"
+            lines.append(f"  {icon} Шаг {i}: {sr.step_name} "
+                         f"({sr.duration:.2f}с)")
+        return ToolResult(
+            "run_chain", result.success, "\n".join(lines),
+            data={
+                "chain": chain_name,
+                "status": result.status.value,
+                "success": result.success,
+                "total_time": round(result.total_time, 3),
+                "steps": len(result.step_results),
+            },
+        )
+    except Exception as e:
+        return ToolResult(
+            "run_chain", False, "",
+            error=f"Ошибка выполнения цепочки: {e}",
+        )
+
+
+async def tool_health_check(
+    action: str = "report",
+    **kwargs,
+) -> ToolResult:
+    """Показать здоровье инструментов."""
+    from pds_ultimate.core.integration_layer import integration_layer
+
+    try:
+        if action == "stats":
+            stats = integration_layer.get_stats()
+            lines = [
+                "📊 Статистика интеграции:",
+                f"  🔗 Цепочек: {stats.get('chains', 0)}",
+                f"  🛡️ Breakers: {stats.get('circuit_breakers', 0)}",
+                f"  📈 Метрик: {stats.get('metrics', 0)}",
+                f"  🔄 Fallbacks: {stats.get('fallbacks', 0)}",
+                f"  🩺 Auto-heals: {stats.get('auto_heals', 0)}",
+            ]
+            return ToolResult(
+                "tool_health", True, "\n".join(lines), data=stats,
+            )
+
+        report = integration_layer.get_health_report()
+        if action == "unhealthy":
+            report = {k: v for k, v in report.items()
+                      if v.get("health") != "healthy"}
+        elif action == "slow":
+            report = {k: v for k, v in report.items()
+                      if v.get("avg_time", 0) > 2.0}
+
+        if not report:
+            return ToolResult(
+                "tool_health", True,
+                "✅ Все инструменты работают нормально.",
+                data={"healthy": True},
+            )
+
+        lines = [f"🩺 Здоровье инструментов ({len(report)}):"]
+        for name, info in list(report.items())[:20]:
+            health = info.get("health", "unknown")
+            icon = {"healthy": "✅", "degraded": "⚠️",
+                    "unhealthy": "❌"}.get(health, "❓")
+            lines.append(f"  {icon} {name}: {health}")
+        return ToolResult(
+            "tool_health", True, "\n".join(lines), data=report,
+        )
+    except Exception as e:
+        return ToolResult(
+            "tool_health", False, "",
+            error=f"Ошибка проверки здоровья: {e}",
+        )
+
+
+async def tool_parallel_execute(
+    calls: str,
+    **kwargs,
+) -> ToolResult:
+    """Выполнить несколько инструментов параллельно."""
+    from pds_ultimate.core.integration_layer import integration_layer
+
+    try:
+        # Парсим формат: tool1:p1=v1,p2=v2;tool2:p1=v1
+        parsed = []
+        for part in calls.split(";"):
+            part = part.strip()
+            if not part:
+                continue
+            if ":" in part:
+                tname, params_str = part.split(":", 1)
+                params = {}
+                for kv in params_str.split(","):
+                    kv = kv.strip()
+                    if "=" in kv:
+                        k, v = kv.split("=", 1)
+                        params[k.strip()] = v.strip()
+                parsed.append((tname.strip(), params))
+            else:
+                parsed.append((part.strip(), {}))
+
+        if not parsed:
+            return ToolResult(
+                "parallel_tools", False, "",
+                error="Не указаны вызовы. Формат: tool1:p1=v1;tool2:p2=v2",
+            )
+
+        results = await integration_layer.execute_parallel(parsed)
+        ok = sum(1 for r in results if getattr(r, "success", False))
+        lines = [
+            f"⚡ Параллельное выполнение: {ok}/{len(results)} успешно",
+        ]
+        for i, r in enumerate(results):
+            tname = parsed[i][0] if i < len(parsed) else "?"
+            icon = "✅" if getattr(r, "success", False) else "❌"
+            out = getattr(r, "output", "")
+            snippet = (out[:60] + "…") if len(out) > 60 else out
+            lines.append(f"  {icon} {tname}: {snippet}")
+        return ToolResult(
+            "parallel_tools", True, "\n".join(lines),
+            data={"total": len(results), "success": ok},
+        )
+    except Exception as e:
+        return ToolResult(
+            "parallel_tools", False, "",
+            error=f"Ошибка параллельного выполнения: {e}",
+        )
+
+
+async def tool_list_chains(**kwargs) -> ToolResult:
+    """Показать все доступные цепочки."""
+    from pds_ultimate.core.integration_layer import integration_layer
+
+    try:
+        chains = list(integration_layer.chains.keys())
+        router_chains = list(integration_layer.router.routes.keys()) \
+            if integration_layer.router else []
+        lines = [f"🔗 Доступные цепочки ({len(chains)}):"]
+        for ch in chains:
+            chain = integration_layer.chains[ch]
+            lines.append(f"  • {ch} ({len(chain.steps)} шагов)")
+        if router_chains:
+            lines.append(f"\n🗺️ Авто-маршруты ({len(router_chains)}):")
+            for rc in router_chains:
+                lines.append(f"  • {rc}")
+        return ToolResult(
+            "list_chains", True, "\n".join(lines),
+            data={"chains": chains, "routes": router_chains},
+        )
+    except Exception as e:
+        return ToolResult(
+            "list_chains", False, "",
+            error=f"Ошибка получения списка цепочек: {e}",
         )
