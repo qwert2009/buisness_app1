@@ -190,6 +190,48 @@ async def main():
         f"{wf_stats['checklists']['total']} чек-листов"
     )
 
+    # Part 10: Semantic Search V2, Confidence, Query Expansion,
+    #          Task Prioritizer, Context Compressor, Time Relevance
+    from pds_ultimate.core.adaptive_query import adaptive_query
+    from pds_ultimate.core.confidence_tracker import confidence_tracker
+    from pds_ultimate.core.context_compressor import context_compressor
+    from pds_ultimate.core.semantic_search_v2 import semantic_search_v2
+    from pds_ultimate.core.task_prioritizer import task_prioritizer
+    from pds_ultimate.core.time_relevance import time_relevance
+
+    ss_stats = semantic_search_v2.get_stats()
+    logger.info(
+        f"  🔍 Semantic Search V2: "
+        f"kb={ss_stats['knowledge_base']['size']}, "
+        f"docs={ss_stats['document_store']['documents']}"
+    )
+    ct_stats = confidence_tracker.get_stats()
+    logger.info(
+        f"  📊 Confidence Tracker: "
+        f"threshold={ct_stats['auto_search']['threshold']}"
+    )
+    aq_stats = adaptive_query.get_stats()
+    logger.info(
+        f"  🔄 Adaptive Query: "
+        f"synonyms={aq_stats['synonyms_count']}, "
+        f"refinements={aq_stats['refinement']['total_refinements']}"
+    )
+    tp_stats = task_prioritizer.get_stats()
+    logger.info(
+        f"  📋 Task Prioritizer: "
+        f"queue={tp_stats['queue']['total']}"
+    )
+    cc_stats = context_compressor.get_stats()
+    logger.info(
+        f"  📝 Context Compressor: "
+        f"window={cc_stats['context_window']['entries']} entries"
+    )
+    tr_stats = time_relevance.get_stats()
+    logger.info(
+        f"  ⏱️ Time Relevance: "
+        f"sources={tr_stats['sources']['count']}"
+    )
+
     # ─── 4. Запуск интеграций ────────────────────────────────────────────
     logger.info("[4/7] Запуск внешних интеграций...")
 

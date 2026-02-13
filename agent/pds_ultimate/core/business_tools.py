@@ -1679,6 +1679,187 @@ def register_all_tools() -> int:
             handler=tool_create_template,
             category="workflow",
         ),
+
+        # ─── Part 10: Semantic Search V2 ────────────────────────────
+        Tool(
+            name="knowledge_add",
+            description=(
+                "Добавить знание в базу знаний. Знания индексируются "
+                "для семантического поиска и могут быть найдены по смыслу."
+            ),
+            parameters=[
+                ToolParameter("content", "string", "Содержимое знания", True),
+                ToolParameter("category", "string",
+                              "Категория: answer/document/conversation/fact/skill/business/general",
+                              False, "general"),
+                ToolParameter("source", "string", "Источник", False, ""),
+                ToolParameter("tags", "string",
+                              "Теги через запятую", False, ""),
+            ],
+            handler=tool_knowledge_add,
+            category="knowledge",
+        ),
+        Tool(
+            name="knowledge_search",
+            description=(
+                "Семантический поиск по базе знаний. "
+                "Находит релевантные знания по смыслу, а не по точному совпадению."
+            ),
+            parameters=[
+                ToolParameter("query", "string", "Поисковый запрос", True),
+                ToolParameter("category", "string",
+                              "Фильтр по категории", False, ""),
+                ToolParameter("max_results", "number",
+                              "Максимум результатов", False, 5),
+            ],
+            handler=tool_knowledge_search,
+            category="knowledge",
+        ),
+
+        # ─── Part 10: Confidence Tracker ────────────────────────────
+        Tool(
+            name="confidence_check",
+            description=(
+                "Оценить уверенность в ответе. Показывает: уровень "
+                "уверенности, факторы неопределённости, нужен ли "
+                "дополнительный поиск."
+            ),
+            parameters=[
+                ToolParameter("text", "string", "Текст для оценки", True),
+                ToolParameter("source_count", "number",
+                              "Количество источников", False, 1),
+                ToolParameter("source_agreement", "number",
+                              "Согласованность источников (0-1)", False, 0.5),
+            ],
+            handler=tool_confidence_check,
+            category="confidence",
+        ),
+
+        # ─── Part 10: Adaptive Query Expansion ──────────────────────
+        Tool(
+            name="expand_query",
+            description=(
+                "Расширить/улучшить поисковый запрос. "
+                "Добавляет синонимы, контекстные термины, временные маркеры. "
+                "Помогает найти больше релевантных результатов."
+            ),
+            parameters=[
+                ToolParameter("query", "string", "Исходный запрос", True),
+                ToolParameter("context", "string",
+                              "Контекст для расширения", False, ""),
+                ToolParameter("strategy", "string",
+                              "Стратегия: synonym/related/specific/broad/temporal/contextual",
+                              False, "synonym"),
+            ],
+            handler=tool_expand_query,
+            category="search",
+        ),
+        Tool(
+            name="find_gaps",
+            description=(
+                "Найти пробелы в ответе: чего не хватает? "
+                "Анализирует полноту, наличие данных, подтверждений."
+            ),
+            parameters=[
+                ToolParameter("query", "string", "Исходный вопрос", True),
+                ToolParameter("answer", "string", "Текущий ответ", True),
+                ToolParameter("confidence", "number",
+                              "Текущая уверенность (0-1)", False, 0.5),
+            ],
+            handler=tool_find_gaps,
+            category="search",
+        ),
+
+        # ─── Part 10: Task Prioritizer ──────────────────────────────
+        Tool(
+            name="task_add",
+            description=(
+                "Добавить задачу в умную очередь с приоритетом. "
+                "Задачи сортируются по приоритету, дедлайну, "
+                "и возрасту (anti-starvation)."
+            ),
+            parameters=[
+                ToolParameter("name", "string", "Название задачи", True),
+                ToolParameter("priority", "string",
+                              "Приоритет: critical/high/medium/low/background",
+                              False, "medium"),
+                ToolParameter("task_type", "string",
+                              "Тип задачи: general/api/research/report",
+                              False, "general"),
+                ToolParameter("deadline_sec", "number",
+                              "Дедлайн в секундах (0 = нет)", False, 0),
+            ],
+            handler=tool_task_add,
+            category="tasks",
+        ),
+        Tool(
+            name="task_queue",
+            description=(
+                "Показать очередь задач, план выполнения, "
+                "оценку времени."
+            ),
+            parameters=[
+                ToolParameter("action", "string",
+                              "Действие: list/plan/next/stats",
+                              False, "list"),
+            ],
+            handler=tool_task_queue,
+            category="tasks",
+        ),
+
+        # ─── Part 10: Context Compressor ────────────────────────────
+        Tool(
+            name="summarize_text",
+            description=(
+                "Суммаризировать текст (экстрактивная суммаризация). "
+                "Выбирает ключевые предложения. Для длинных текстов "
+                "используется рекурсивная суммаризация."
+            ),
+            parameters=[
+                ToolParameter("text", "string",
+                              "Текст для суммаризации", True),
+                ToolParameter("ratio", "number",
+                              "Степень сжатия (0.1-0.9, меньше = короче)",
+                              False, 0.3),
+                ToolParameter("recursive", "boolean",
+                              "Рекурсивная суммаризация (для очень длинных)",
+                              False, False),
+            ],
+            handler=tool_summarize_text,
+            category="text",
+        ),
+
+        # ─── Part 10: Time & Relevance ──────────────────────────────
+        Tool(
+            name="check_freshness",
+            description=(
+                "Проверить актуальность данных. Извлекает даты, "
+                "оценивает свежесть, даёт рекомендацию об обновлении. "
+                "«Этот ответ основан на данных за 2023 год — проверить?»"
+            ),
+            parameters=[
+                ToolParameter("text", "string", "Текст для проверки", True),
+            ],
+            handler=tool_check_freshness,
+            category="analysis",
+        ),
+        Tool(
+            name="time_decay",
+            description=(
+                "Применить временное затухание к оценке. "
+                "Учитывает возраст данных для корректировки скора."
+            ),
+            parameters=[
+                ToolParameter("score", "number", "Базовый скор (0-1)", True),
+                ToolParameter("age_days", "number",
+                              "Возраст данных в днях", True),
+                ToolParameter("method", "string",
+                              "Метод: exponential/linear/hyperbolic",
+                              False, "exponential"),
+            ],
+            handler=tool_time_decay,
+            category="analysis",
+        ),
     ]
 
     for tool in tools:
@@ -2684,4 +2865,471 @@ async def tool_quick_search(
         return ToolResult(
             "quick_search", False, "",
             error=f"Ошибка быстрого поиска: {e}",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART 10: KNOWLEDGE BASE / SEMANTIC SEARCH V2 (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_knowledge_add(
+    content: str,
+    category: str = "general",
+    source: str = "",
+    tags: str = "",
+    **kwargs,
+) -> ToolResult:
+    """Добавить знание в базу знаний."""
+    from pds_ultimate.core.semantic_search_v2 import semantic_search_v2
+
+    try:
+        tag_list = [t.strip()
+                    for t in tags.split(",") if t.strip()] if tags else []
+        item_id = semantic_search_v2.add_knowledge(
+            content=content,
+            category=category,
+            source=source,
+            tags=tag_list,
+        )
+        return ToolResult(
+            "knowledge_add", True,
+            f"📚 Знание добавлено в базу!\n"
+            f"  🆔 ID: {item_id}\n"
+            f"  📁 Категория: {category}\n"
+            f"  🏷️ Теги: {', '.join(tag_list) if tag_list else '—'}",
+            data={"id": item_id, "category": category},
+        )
+    except Exception as e:
+        return ToolResult(
+            "knowledge_add", False, "",
+            error=f"Ошибка добавления знания: {e}",
+        )
+
+
+async def tool_knowledge_search(
+    query: str,
+    category: str = "",
+    max_results: int = 5,
+    **kwargs,
+) -> ToolResult:
+    """Семантический поиск по базе знаний."""
+    from pds_ultimate.core.semantic_search_v2 import semantic_search_v2
+
+    try:
+        results = semantic_search_v2.search_knowledge(
+            query=query,
+            category=category or None,
+            max_results=int(max_results),
+        )
+        if not results:
+            return ToolResult(
+                "knowledge_search", True,
+                "🔍 Ничего не найдено в базе знаний.",
+                data={"results": [], "count": 0},
+            )
+
+        lines = [f"🔍 Найдено {len(results)} результатов:"]
+        for i, r in enumerate(results, 1):
+            lines.append(
+                f"\n  {i}. [{r.item.category.value}] "
+                f"(скор: {r.final_score:.2f})\n"
+                f"     {r.item.content[:150]}..."
+            )
+        stats = semantic_search_v2.get_stats()
+        lines.append(
+            f"\n📊 Всего в базе: {stats['knowledge_base']['total']} знаний")
+
+        return ToolResult(
+            "knowledge_search", True, "\n".join(lines),
+            data={"results": [r.to_dict() for r in results],
+                  "count": len(results)},
+        )
+    except Exception as e:
+        return ToolResult(
+            "knowledge_search", False, "",
+            error=f"Ошибка поиска: {e}",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART 10: CONFIDENCE TRACKER (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_confidence_check(
+    text: str,
+    source_count: int = 1,
+    source_agreement: float = 0.5,
+    **kwargs,
+) -> ToolResult:
+    """Оценить уверенность в ответе."""
+    from pds_ultimate.core.confidence_tracker import confidence_tracker
+
+    try:
+        score = confidence_tracker.estimate(
+            text=text,
+            source_count=int(source_count),
+            source_agreement=float(source_agreement),
+        )
+        needs = confidence_tracker.needs_search(score)
+
+        lines = [
+            f"{score.emoji} Уверенность: {score.value:.0%} ({score.level.value})",
+        ]
+        if score.factors:
+            lines.append("📊 Факторы:")
+            for k, v in score.factors.items():
+                lines.append(f"  • {k}: {v:.2f}")
+        if score.uncertainties:
+            lines.append("⚠️ Неопределённости:")
+            for u in score.uncertainties:
+                lines.append(f"  • {u.value}")
+        if needs:
+            lines.append("🔍 Рекомендуется дополнительный поиск!")
+            plan = confidence_tracker.get_search_plan(score)
+            if plan:
+                lines.append(f"  План: {plan.get('action', '?')}")
+
+        return ToolResult(
+            "confidence_check", True, "\n".join(lines),
+            data=score.to_dict(),
+        )
+    except Exception as e:
+        return ToolResult(
+            "confidence_check", False, "",
+            error=f"Ошибка оценки уверенности: {e}",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART 10: ADAPTIVE QUERY EXPANSION (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_expand_query(
+    query: str,
+    context: str = "",
+    strategy: str = "synonym",
+    **kwargs,
+) -> ToolResult:
+    """Расширить поисковый запрос."""
+    from pds_ultimate.core.adaptive_query import adaptive_query
+
+    try:
+        expanded = adaptive_query.expand(
+            query=query,
+            context=context,
+            strategy=strategy,
+        )
+        lines = [
+            "🔄 Расширение запроса:",
+            f"  📝 Оригинал: {expanded.original}",
+            f"  ✨ Расширенный: {expanded.expanded}",
+            f"  📋 Стратегия: {expanded.strategy.value}",
+            f"  📊 Уверенность: {expanded.confidence:.0%}",
+        ]
+        if expanded.added_terms:
+            lines.append(f"  ➕ Добавлено: {', '.join(expanded.added_terms)}")
+        if expanded.removed_terms:
+            lines.append(f"  ➖ Убрано: {', '.join(expanded.removed_terms)}")
+
+        return ToolResult(
+            "expand_query", True, "\n".join(lines),
+            data=expanded.to_dict(),
+        )
+    except Exception as e:
+        return ToolResult(
+            "expand_query", False, "",
+            error=f"Ошибка расширения запроса: {e}",
+        )
+
+
+async def tool_find_gaps(
+    query: str,
+    answer: str,
+    confidence: float = 0.5,
+    **kwargs,
+) -> ToolResult:
+    """Найти пробелы в ответе."""
+    from pds_ultimate.core.adaptive_query import adaptive_query
+
+    try:
+        gaps = adaptive_query.find_gaps(
+            query=query,
+            answer=answer,
+            confidence=float(confidence),
+        )
+        if not gaps:
+            return ToolResult(
+                "find_gaps", True,
+                "✅ Пробелов не найдено — ответ полный!",
+                data={"gaps": [], "count": 0},
+            )
+
+        lines = [f"🔍 Найдено {len(gaps)} пробелов:"]
+        for i, gap in enumerate(gaps, 1):
+            lines.append(
+                f"\n  {i}. [{gap.gap_type.value}] {gap.description}\n"
+                f"     Приоритет: {gap.priority:.0%}"
+            )
+            if gap.suggested_query:
+                lines.append(f"     💡 Запрос: {gap.suggested_query}")
+
+        return ToolResult(
+            "find_gaps", True, "\n".join(lines),
+            data={"gaps": [g.to_dict() for g in gaps], "count": len(gaps)},
+        )
+    except Exception as e:
+        return ToolResult(
+            "find_gaps", False, "",
+            error=f"Ошибка анализа пробелов: {e}",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART 10: TASK PRIORITIZER (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_task_add(
+    name: str,
+    priority: str = "medium",
+    task_type: str = "general",
+    deadline_sec: float = 0,
+    **kwargs,
+) -> ToolResult:
+    """Добавить задачу в очередь."""
+    from pds_ultimate.core.task_prioritizer import task_prioritizer
+
+    try:
+        dl = float(deadline_sec) if float(deadline_sec) > 0 else None
+        task = task_prioritizer.add_task(
+            name=name,
+            priority=priority,
+            task_type=task_type,
+            deadline_sec=dl,
+        )
+        lines = [
+            "📋 Задача добавлена в очередь!",
+            f"  🆔 ID: {task.id}",
+            f"  📌 Приоритет: {task.priority.name}",
+            f"  📁 Тип: {task.task_type}",
+        ]
+        if task.deadline:
+            ttd = task.time_to_deadline
+            if ttd is not None:
+                lines.append(f"  ⏰ Дедлайн через: {ttd:.0f} сек")
+        stats = task_prioritizer.get_stats()
+        lines.append(
+            f"\n📊 В очереди: {stats['queue']['pending']} задач"
+        )
+        return ToolResult(
+            "task_add", True, "\n".join(lines),
+            data=task.to_dict(),
+        )
+    except Exception as e:
+        return ToolResult(
+            "task_add", False, "",
+            error=f"Ошибка добавления задачи: {e}",
+        )
+
+
+async def tool_task_queue(
+    action: str = "list",
+    **kwargs,
+) -> ToolResult:
+    """Показать очередь задач."""
+    from pds_ultimate.core.task_prioritizer import task_prioritizer
+
+    try:
+        if action == "next":
+            task = task_prioritizer.next_task()
+            if task is None:
+                return ToolResult(
+                    "task_queue", True,
+                    "📋 Очередь пуста — нет задач.",
+                    data={"task": None},
+                )
+            return ToolResult(
+                "task_queue", True,
+                f"▶️ Следующая задача: {task.name}\n"
+                f"  🆔 {task.id} | 📌 {task.priority.name}",
+                data=task.to_dict(),
+            )
+
+        if action == "plan":
+            plan = task_prioritizer.get_plan()
+            if not plan:
+                return ToolResult(
+                    "task_queue", True,
+                    "📋 Нет задач для планирования.",
+                    data={"plan": []},
+                )
+            lines = ["📋 План выполнения:"]
+            for i, wave in enumerate(plan, 1):
+                lines.append(f"\n  🌊 Волна {i} ({len(wave)} задач):")
+                for t in wave:
+                    lines.append(f"    • {t['name']} [{t['priority']}]")
+            est = task_prioritizer.estimate_time()
+            lines.append(f"\n⏱️ Оценка времени: {est:.1f} сек")
+            return ToolResult(
+                "task_queue", True, "\n".join(lines),
+                data={"plan": plan, "estimated_sec": est},
+            )
+
+        if action == "stats":
+            stats = task_prioritizer.get_stats()
+            q = stats["queue"]
+            lines = [
+                "📊 Статистика очереди:",
+                f"  📋 Всего: {q['total']}",
+                f"  ⏳ Ожидают: {q['pending']}",
+                f"  ▶️ Выполняются: {q['running']}",
+                f"  ✅ Завершены: {q['completed']}",
+                f"  ❌ Ошибки: {q['failed']}",
+                f"  ⚠️ Просрочены: {q['overdue']}",
+            ]
+            return ToolResult(
+                "task_queue", True, "\n".join(lines),
+                data=stats,
+            )
+
+        # Default: list
+        stats = task_prioritizer.get_stats()
+        q = stats["queue"]
+        return ToolResult(
+            "task_queue", True,
+            f"📋 Очередь задач: {q['pending']} ожидают, "
+            f"{q['running']} выполняются, {q['completed']} завершены",
+            data=stats,
+        )
+    except Exception as e:
+        return ToolResult(
+            "task_queue", False, "",
+            error=f"Ошибка очереди задач: {e}",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART 10: CONTEXT COMPRESSOR (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_summarize_text(
+    text: str,
+    ratio: float = 0.3,
+    recursive: bool = False,
+    **kwargs,
+) -> ToolResult:
+    """Суммаризировать текст."""
+    from pds_ultimate.core.context_compressor import context_compressor
+
+    try:
+        ratio_val = max(0.1, min(0.9, float(ratio)))
+        if recursive or len(text) > 3000:
+            result = context_compressor.summarize_recursive(text)
+        else:
+            result = context_compressor.summarize(text, ratio=ratio_val)
+
+        lines = [
+            "📝 Суммаризация:",
+            f"  📏 Оригинал: {result.original_length} символов",
+            f"  📐 Сжато: {result.compressed_length} символов",
+            f"  💾 Экономия: {result.savings_pct:.1f}%",
+            f"  📋 Метод: {result.method}",
+        ]
+        if result.key_terms:
+            lines.append(f"  🏷️ Ключевые: {', '.join(result.key_terms[:5])}")
+        lines.append(f"\n{result.text}")
+
+        return ToolResult(
+            "summarize_text", True, "\n".join(lines),
+            data=result.to_dict(),
+        )
+    except Exception as e:
+        return ToolResult(
+            "summarize_text", False, "",
+            error=f"Ошибка суммаризации: {e}",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART 10: TIME & RELEVANCE (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_check_freshness(
+    text: str,
+    **kwargs,
+) -> ToolResult:
+    """Проверить актуальность данных."""
+    from pds_ultimate.core.time_relevance import time_relevance
+
+    try:
+        report = time_relevance.check_freshness(text)
+
+        lines = [
+            f"{report.grade.emoji} Свежесть: {report.grade.value.upper()}",
+            f"  📊 Скор: {report.score:.0%}",
+            f"  📅 Возраст: {report.data_age_days:.0f} дней",
+        ]
+        if report.markers:
+            lines.append(f"  🔍 Дат найдено: {len(report.markers)}")
+            for m in report.markers[:3]:
+                lines.append(f"    • «{m.text}» → {m.scope.value}")
+        if report.recommendation:
+            lines.append(f"\n💡 {report.recommendation}")
+        if report.needs_update:
+            lines.append("⚠️ Рекомендуется обновить данные!")
+
+        return ToolResult(
+            "check_freshness", True, "\n".join(lines),
+            data=report.to_dict(),
+        )
+    except Exception as e:
+        return ToolResult(
+            "check_freshness", False, "",
+            error=f"Ошибка проверки свежести: {e}",
+        )
+
+
+async def tool_time_decay(
+    score: float,
+    age_days: float,
+    method: str = "exponential",
+    **kwargs,
+) -> ToolResult:
+    """Применить временное затухание."""
+    from pds_ultimate.core.time_relevance import time_relevance
+
+    try:
+        adjusted = time_relevance.apply_time_decay(
+            score=float(score),
+            age_days=float(age_days),
+            method=method,
+        )
+        delta = adjusted - float(score)
+        lines = [
+            "⏱️ Временное затухание:",
+            f"  📊 Исходный скор: {float(score):.3f}",
+            f"  📅 Возраст: {float(age_days):.0f} дней",
+            f"  📈 Метод: {method}",
+            f"  🎯 Скорректированный: {adjusted:.3f}",
+            f"  📉 Дельта: {delta:+.3f}",
+        ]
+        return ToolResult(
+            "time_decay", True, "\n".join(lines),
+            data={
+                "original": float(score),
+                "adjusted": round(adjusted, 4),
+                "delta": round(delta, 4),
+                "method": method,
+                "age_days": float(age_days),
+            },
+        )
+    except Exception as e:
+        return ToolResult(
+            "time_decay", False, "",
+            error=f"Ошибка затухания: {e}",
         )

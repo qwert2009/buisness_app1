@@ -64,7 +64,7 @@ class TestPart8ToolRegistration:
     def test_total_tools_38(self):
         """46 инструментов (31 old + 7 Part8 + 8 Part9)."""
         count = len(tool_registry._tools)
-        assert count == 46, f"Ожидалось 46, получено {count}"
+        assert count == 56, f"Ожидалось 56, получено {count}"
 
     def test_part8_tools_have_descriptions(self):
         """Все Part 8 tools имеют описания."""
