@@ -1513,6 +1513,172 @@ def register_all_tools() -> int:
             handler=tool_memory_stats,
             category="memory",
         ),
+
+        # ─── Part 9: Smart Triggers ─────────────────────────────────
+        Tool(
+            name="set_trigger",
+            description=(
+                "Установить умный триггер/алерт. "
+                "Типы: exchange_rate (курс), balance (баланс), "
+                "supplier_silence (тишина поставщика), deadline, price_change. "
+                "Или пользовательский триггер на любое условие."
+            ),
+            parameters=[
+                ToolParameter("name", "string", "Название триггера", True),
+                ToolParameter("trigger_type", "string",
+                              "Тип: threshold/silence/exchange_rate/balance/deadline/price_change/custom",
+                              False, "threshold"),
+                ToolParameter("field", "string",
+                              "Поле для мониторинга (rate_usd_cny, balance, etc.)", False),
+                ToolParameter("operator", "string",
+                              "Оператор: >/>=/</<=/==/!=", False, ">"),
+                ToolParameter("value", "string",
+                              "Пороговое значение", False),
+                ToolParameter("severity", "string",
+                              "Серьёзность: info/warning/critical/emergency", False, "warning"),
+                ToolParameter("template", "string",
+                              "Шаблон: exchange_rate/balance/supplier_silence/deadline/price_change",
+                              False),
+            ],
+            handler=tool_set_trigger,
+            category="triggers",
+        ),
+        Tool(
+            name="list_triggers",
+            description="Показать список активных триггеров и историю алертов.",
+            parameters=[
+                ToolParameter("show_history", "boolean",
+                              "Показать историю алертов", False, False),
+            ],
+            handler=tool_list_triggers,
+            category="triggers",
+        ),
+
+        # ─── Part 9: Analytics Dashboard ────────────────────────────
+        Tool(
+            name="dashboard",
+            description=(
+                "Бизнес-дашборд: ключевые метрики, KPI, тренды. "
+                "Записывает метрики и показывает аналитику."
+            ),
+            parameters=[
+                ToolParameter("action", "string",
+                              "Действие: show/record/trend/forecast", False, "show"),
+                ToolParameter("metric_name", "string",
+                              "Имя метрики (для record/trend/forecast)", False),
+                ToolParameter("value", "number",
+                              "Значение (для record)", False),
+                ToolParameter("unit", "string",
+                              "Единица измерения", False, ""),
+            ],
+            handler=tool_dashboard,
+            category="analytics",
+        ),
+        Tool(
+            name="kpi_track",
+            description=(
+                "Отслеживание KPI: создать цель, обновить прогресс, "
+                "показать доску KPI."
+            ),
+            parameters=[
+                ToolParameter("action", "string",
+                              "Действие: create/update/board", False, "board"),
+                ToolParameter("name", "string", "Название KPI", False),
+                ToolParameter("target", "number", "Целевое значение", False),
+                ToolParameter("value", "number",
+                              "Текущее значение (для update)", False),
+                ToolParameter("unit", "string",
+                              "Единица измерения", False, ""),
+            ],
+            handler=tool_kpi_track,
+            category="analytics",
+        ),
+
+        # ─── Part 9: CRM ────────────────────────────────────────────
+        Tool(
+            name="rate_contact",
+            description=(
+                "Оценить контакт/поставщика (1-5 звёзд). "
+                "Можно оценить в целом или по категориям: "
+                "reliability, quality, pricing, communication, delivery_speed."
+            ),
+            parameters=[
+                ToolParameter("name", "string",
+                              "Имя контакта/поставщика", True),
+                ToolParameter("rating", "number",
+                              "Рейтинг (1-5 звёзд)", True),
+                ToolParameter("comment", "string",
+                              "Комментарий к оценке", False, ""),
+                ToolParameter("category", "string",
+                              "Категория: reliability/quality/pricing/communication/delivery_speed",
+                              False, ""),
+            ],
+            handler=tool_rate_contact,
+            category="crm",
+        ),
+        Tool(
+            name="crm_search",
+            description=(
+                "Поиск в CRM: контакты, сделки, pipeline. "
+                "Фильтрация по типу, рейтингу, тегам."
+            ),
+            parameters=[
+                ToolParameter("query", "string",
+                              "Поисковый запрос (имя, компания)", False, ""),
+                ToolParameter("action", "string",
+                              "Действие: search/pipeline/stats/add_contact/add_deal",
+                              False, "search"),
+                ToolParameter("contact_type", "string",
+                              "Тип: supplier/client/partner/logistics/other", False, ""),
+                ToolParameter("min_rating", "number",
+                              "Минимальный рейтинг (0-5)", False, 0),
+            ],
+            handler=tool_crm_search,
+            category="crm",
+        ),
+
+        # ─── Part 9: Evening Digest ─────────────────────────────────
+        Tool(
+            name="evening_digest",
+            description=(
+                "Вечерний дайджест: итоги дня, сравнение с вчера, "
+                "рекомендации на завтра. Автоматическая аналитика."
+            ),
+            parameters=[
+                ToolParameter("format", "string",
+                              "Формат: full/short", False, "full"),
+                ToolParameter("revenue", "number",
+                              "Доход за сегодня (если не из БД)", False, 0),
+                ToolParameter("expenses", "number",
+                              "Расходы за сегодня", False, 0),
+                ToolParameter("orders_created", "number",
+                              "Заказов создано", False, 0),
+                ToolParameter("tasks_completed", "number",
+                              "Задач завершено", False, 0),
+            ],
+            handler=tool_evening_digest,
+            category="reports",
+        ),
+
+        # ─── Part 9: Workflow & Templates ────────────────────────────
+        Tool(
+            name="create_template",
+            description=(
+                "Создать шаблон заказа, чек-лист или workflow. "
+                "Шаблоны можно переиспользовать для быстрого создания."
+            ),
+            parameters=[
+                ToolParameter("name", "string", "Название шаблона", True),
+                ToolParameter("template_type", "string",
+                              "Тип: order/checklist/workflow/message", False, "checklist"),
+                ToolParameter("content", "string",
+                              "Содержимое/шаги (каждый шаг на новой строке)", True),
+                ToolParameter("description", "string",
+                              "Описание шаблона", False, ""),
+            ],
+            handler=tool_create_template,
+            category="workflow",
+        ),
     ]
 
     for tool in tools:
@@ -1813,6 +1979,462 @@ async def tool_memory_stats(**kwargs) -> ToolResult:
         return ToolResult(
             "memory_stats", False, "",
             error=f"Ошибка получения статистики: {e}",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART 9: SMART TRIGGERS (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_set_trigger(
+    name: str,
+    trigger_type: str = "threshold",
+    field: str = "",
+    operator: str = ">",
+    value: str = "",
+    severity: str = "warning",
+    template: str = "",
+    **kwargs,
+) -> ToolResult:
+    """Установить умный триггер."""
+    from pds_ultimate.core.smart_triggers import (
+        ComparisonOp,
+        TriggerCondition,
+        trigger_manager,
+    )
+
+    try:
+        # Если указан шаблон — используем его
+        if template:
+            template_kwargs = {}
+            if value:
+                # Парсим значение для шаблона
+                try:
+                    template_kwargs["threshold"] = float(value)
+                except ValueError:
+                    template_kwargs["supplier_name"] = value
+
+            trigger = trigger_manager.create_from_template(
+                template, **template_kwargs,
+            )
+            trigger.name = name or trigger.name
+        else:
+            # Создаём пользовательский триггер
+            condition = None
+            if field and value:
+                try:
+                    op = ComparisonOp(operator)
+                except ValueError:
+                    op = ComparisonOp.GT
+
+                try:
+                    val = float(value)
+                except ValueError:
+                    val = value
+
+                condition = TriggerCondition(
+                    field=field,
+                    operator=op,
+                    value=val,
+                )
+
+            trigger = trigger_manager.create_trigger(
+                name=name,
+                trigger_type=trigger_type,
+                condition=condition,
+                severity=severity,
+            )
+
+        return ToolResult(
+            "set_trigger", True,
+            f"🔔 Триггер «{trigger.name}» создан!\n"
+            f"  🆔 ID: {trigger.id}\n"
+            f"  📋 Тип: {trigger.trigger_type.value}\n"
+            f"  ⚡ Серьёзность: {trigger.severity.value}\n"
+            f"  📌 Условие: {trigger.condition.describe() if trigger.condition else 'custom'}",
+            data=trigger.to_dict(),
+        )
+    except Exception as e:
+        return ToolResult(
+            "set_trigger", False, "",
+            error=f"Ошибка создания триггера: {e}",
+        )
+
+
+async def tool_list_triggers(
+    show_history: bool = False,
+    **kwargs,
+) -> ToolResult:
+    """Список триггеров и алертов."""
+    from pds_ultimate.core.smart_triggers import trigger_manager
+
+    try:
+        triggers_text = trigger_manager.format_triggers_list()
+        stats = trigger_manager.get_stats()
+
+        lines = [triggers_text]
+        lines.append(
+            f"\n📊 Всего: {stats['total']}, "
+            f"активных: {stats['active']}, "
+            f"срабатываний: {stats['total_fires']}"
+        )
+
+        if show_history:
+            recent = trigger_manager.history.get_recent(10)
+            if recent:
+                lines.append("\n📜 Последние алерты:")
+                for a in recent:
+                    lines.append(f"  • {a.format_message()}")
+            else:
+                lines.append("\n📜 Алертов пока нет.")
+
+        return ToolResult(
+            "list_triggers", True, "\n".join(lines),
+            data=stats,
+        )
+    except Exception as e:
+        return ToolResult(
+            "list_triggers", False, "",
+            error=f"Ошибка получения триггеров: {e}",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART 9: ANALYTICS DASHBOARD (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_dashboard(
+    action: str = "show",
+    metric_name: str = "",
+    value: float = 0.0,
+    unit: str = "",
+    **kwargs,
+) -> ToolResult:
+    """Бизнес-дашборд."""
+    from pds_ultimate.core.analytics_dashboard import analytics_dashboard
+
+    try:
+        if action == "record" and metric_name:
+            analytics_dashboard.record_metric(
+                name=metric_name,
+                value=float(value),
+                unit=unit,
+            )
+            return ToolResult(
+                "dashboard", True,
+                f"📊 Записано: {metric_name} = {value} {unit}",
+            )
+        elif action == "trend" and metric_name:
+            report = analytics_dashboard.generate_trend_report()
+            return ToolResult(
+                "dashboard", True, report,
+                data=analytics_dashboard.get_stats(),
+            )
+        elif action == "forecast" and metric_name:
+            forecast = analytics_dashboard.forecast(metric_name)
+            return ToolResult(
+                "dashboard", True,
+                f"📈 Прогноз {metric_name}: {forecast}",
+                data={"forecast": forecast},
+            )
+        else:
+            dashboard = analytics_dashboard.generate_dashboard()
+            return ToolResult(
+                "dashboard", True, dashboard,
+                data=analytics_dashboard.get_stats(),
+            )
+    except Exception as e:
+        return ToolResult(
+            "dashboard", False, "",
+            error=f"Ошибка дашборда: {e}",
+        )
+
+
+async def tool_kpi_track(
+    action: str = "board",
+    name: str = "",
+    target: float = 0.0,
+    value: float = 0.0,
+    unit: str = "",
+    **kwargs,
+) -> ToolResult:
+    """Отслеживание KPI."""
+    from pds_ultimate.core.analytics_dashboard import analytics_dashboard
+
+    try:
+        if action == "create" and name:
+            kpi = analytics_dashboard.create_kpi(
+                name=name,
+                target=float(target),
+                unit=unit,
+            )
+            return ToolResult(
+                "kpi_track", True,
+                f"🎯 KPI «{kpi.name}» создан!\n"
+                f"  📊 Цель: {kpi.target_value} {kpi.unit}\n"
+                f"  📈 Прогресс: {kpi.progress_percent}%",
+                data=kpi.to_dict(),
+            )
+        elif action == "update" and name:
+            kpi = analytics_dashboard.update_kpi(name, float(value))
+            if not kpi:
+                return ToolResult(
+                    "kpi_track", False, "",
+                    error=f"KPI «{name}» не найден",
+                )
+            return ToolResult(
+                "kpi_track", True,
+                f"📊 KPI «{kpi.name}» обновлён!\n"
+                f"  📈 {kpi.current_value:.0f}/{kpi.target_value:.0f} "
+                f"{kpi.unit} [{kpi.progress_percent}%]\n"
+                f"  📋 Статус: {kpi.status.value}",
+                data=kpi.to_dict(),
+            )
+        else:
+            board = analytics_dashboard.kpi_tracker.format_kpi_board()
+            stats = analytics_dashboard.kpi_tracker.get_stats()
+            return ToolResult(
+                "kpi_track", True, board,
+                data=stats,
+            )
+    except Exception as e:
+        return ToolResult(
+            "kpi_track", False, "",
+            error=f"Ошибка KPI: {e}",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART 9: CRM (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_rate_contact(
+    name: str,
+    rating: float,
+    comment: str = "",
+    category: str = "",
+    **kwargs,
+) -> ToolResult:
+    """Оценить контакт/поставщика."""
+    from pds_ultimate.core.crm_engine import crm_engine
+
+    try:
+        rating = max(1.0, min(5.0, float(rating)))
+
+        if category:
+            # Оценка поставщика по категории
+            scorecard = crm_engine.rate_supplier(name, category, rating)
+            if not scorecard:
+                # Автосоздание контакта
+                contact = crm_engine.add_contact(
+                    name=name, contact_type="supplier",
+                    rating=rating,
+                )
+                scorecard = crm_engine.rate_supplier(name, category, rating)
+
+            return ToolResult(
+                "rate_contact", True,
+                f"📊 Оценка «{name}» [{category}]: {rating}/5\n"
+                f"  🏆 Общий балл: {scorecard.overall_score}/5.0"
+                if scorecard else f"⚠️ Не удалось оценить {name}",
+                data=scorecard.to_dict() if scorecard else {},
+            )
+        else:
+            # Общая оценка контакта
+            contact = crm_engine.rate_contact(name, rating, comment)
+            if not contact:
+                # Автосоздание
+                contact = crm_engine.add_contact(
+                    name=name, rating=rating,
+                )
+
+            return ToolResult(
+                "rate_contact", True,
+                f"⭐ «{name}» оценён: {contact.star_rating} ({contact.rating}/5)"
+                + (f"\n  💬 {comment}" if comment else ""),
+                data=contact.to_dict(),
+            )
+    except Exception as e:
+        return ToolResult(
+            "rate_contact", False, "",
+            error=f"Ошибка оценки: {e}",
+        )
+
+
+async def tool_crm_search(
+    query: str = "",
+    action: str = "search",
+    contact_type: str = "",
+    min_rating: float = 0.0,
+    **kwargs,
+) -> ToolResult:
+    """Поиск в CRM."""
+    from pds_ultimate.core.crm_engine import crm_engine
+
+    try:
+        if action == "pipeline":
+            text = crm_engine.pipeline.format_pipeline()
+            stats = crm_engine.pipeline.get_stats()
+            return ToolResult(
+                "crm_search", True, text,
+                data=stats,
+            )
+        elif action == "stats":
+            stats = crm_engine.get_stats()
+            lines = [
+                "📊 CRM Статистика:",
+                f"  👤 Контактов: {stats['contacts']['total']}",
+                f"  📊 Средний рейтинг: {stats['contacts']['avg_rating']}",
+                f"  💼 Сделок: {stats['pipeline']['total']}",
+                f"  💬 Взаимодействий: {stats['interactions']}",
+                f"  📞 Ожидают follow-up: {stats['pending_followups']}",
+            ]
+            return ToolResult(
+                "crm_search", True, "\n".join(lines),
+                data=stats,
+            )
+        elif action == "add_contact" and query:
+            contact = crm_engine.add_contact(
+                name=query, contact_type=contact_type or "other",
+            )
+            return ToolResult(
+                "crm_search", True,
+                f"✅ Контакт «{contact.name}» добавлен (ID: {contact.id})",
+                data=contact.to_dict(),
+            )
+        elif action == "add_deal" and query:
+            deal = crm_engine.create_deal(title=query)
+            return ToolResult(
+                "crm_search", True,
+                f"✅ Сделка «{deal.title}» создана (ID: {deal.id})",
+                data=deal.to_dict(),
+            )
+        else:
+            # Search
+            contacts = crm_engine.search_contacts(
+                query=query,
+                contact_type=contact_type,
+                min_rating=float(min_rating),
+            )
+            if not contacts:
+                return ToolResult(
+                    "crm_search", True,
+                    f"🔍 По запросу «{query}» контактов не найдено.",
+                )
+
+            lines = [f"🔍 Найдено контактов: {len(contacts)}"]
+            for c in contacts[:10]:
+                lines.append(f"\n{c.format_card()}")
+            return ToolResult(
+                "crm_search", True, "\n".join(lines),
+                data={"count": len(contacts),
+                      "contacts": [c.to_dict() for c in contacts[:10]]},
+            )
+    except Exception as e:
+        return ToolResult(
+            "crm_search", False, "",
+            error=f"Ошибка CRM: {e}",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART 9: EVENING DIGEST (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_evening_digest(
+    format: str = "full",
+    revenue: float = 0.0,
+    expenses: float = 0.0,
+    orders_created: int = 0,
+    tasks_completed: int = 0,
+    **kwargs,
+) -> ToolResult:
+    """Вечерний дайджест."""
+    from pds_ultimate.core.evening_digest import DaySummary, evening_digest
+
+    try:
+        summary = DaySummary(
+            revenue=float(revenue),
+            expenses=float(expenses),
+            profit=float(revenue) - float(expenses),
+            orders_created=int(orders_created),
+            tasks_completed=int(tasks_completed),
+        )
+        evening_digest.record_day_summary(summary)
+
+        if format == "short":
+            text = evening_digest.generate_short_digest(summary)
+        else:
+            text = evening_digest.generate_digest(summary)
+
+        return ToolResult(
+            "evening_digest", True, text,
+            data=summary.to_dict(),
+        )
+    except Exception as e:
+        return ToolResult(
+            "evening_digest", False, "",
+            error=f"Ошибка дайджеста: {e}",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART 9: WORKFLOW & TEMPLATES (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_create_template(
+    name: str,
+    template_type: str = "checklist",
+    content: str = "",
+    description: str = "",
+    **kwargs,
+) -> ToolResult:
+    """Создать шаблон или чек-лист."""
+    from pds_ultimate.core.workflow_engine import workflow_engine
+
+    try:
+        if template_type == "checklist" and content:
+            # Создаём чек-лист из содержимого
+            steps = [
+                s.strip().lstrip("0123456789.-) ")
+                for s in content.split("\n")
+                if s.strip()
+            ]
+            checklist = workflow_engine.create_checklist(
+                name=name,
+                steps=steps,
+                description=description,
+            )
+            return ToolResult(
+                "create_template", True,
+                f"📋 Чек-лист «{checklist.name}» создан!\n"
+                f"{checklist.format_text()}",
+                data=checklist.to_dict(),
+            )
+        else:
+            # Создаём шаблон
+            template = workflow_engine.create_template(
+                name=name,
+                template_type=template_type,
+                content=content,
+                description=description,
+            )
+            return ToolResult(
+                "create_template", True,
+                f"📝 Шаблон «{template.name}» создан!\n"
+                f"  📋 Тип: {template.template_type.value}\n"
+                f"  🆔 ID: {template.id}",
+                data=template.to_dict(),
+            )
+    except Exception as e:
+        return ToolResult(
+            "create_template", False, "",
+            error=f"Ошибка создания шаблона: {e}",
         )
 
 

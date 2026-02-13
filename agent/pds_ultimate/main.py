@@ -156,6 +156,40 @@ async def main():
 
     logger.info("  ✅ AI Agent System инициализирована")
 
+    # Part 9: Smart Triggers, Analytics, CRM, Evening Digest, Workflow
+    from pds_ultimate.core.analytics_dashboard import analytics_dashboard
+    from pds_ultimate.core.crm_engine import crm_engine
+    from pds_ultimate.core.evening_digest import evening_digest
+    from pds_ultimate.core.smart_triggers import trigger_manager
+    from pds_ultimate.core.workflow_engine import workflow_engine
+
+    trig_stats = trigger_manager.get_stats()
+    logger.info(
+        f"  🔔 Smart Triggers: {trig_stats['total']} триггеров, "
+        f"{trig_stats['active']} активных"
+    )
+    ad_stats = analytics_dashboard.get_stats()
+    logger.info(
+        f"  📊 Analytics Dashboard: "
+        f"{ad_stats['metrics']['series_count']} метрик, "
+        f"{ad_stats['kpi']['total']} KPI"
+    )
+    crm_stats = crm_engine.get_stats()
+    logger.info(
+        f"  📇 CRM-Lite: {crm_stats['contacts']['total']} контактов, "
+        f"{crm_stats['pipeline']['total']} сделок"
+    )
+    ed_stats = evening_digest.get_stats()
+    logger.info(
+        f"  🌙 Evening Digest: ready "
+        f"(days={ed_stats['days_recorded']}, rules={ed_stats['rules_count']})"
+    )
+    wf_stats = workflow_engine.get_stats()
+    logger.info(
+        f"  📋 Workflow Engine: {wf_stats['templates']['total']} шаблонов, "
+        f"{wf_stats['checklists']['total']} чек-листов"
+    )
+
     # ─── 4. Запуск интеграций ────────────────────────────────────────────
     logger.info("[4/7] Запуск внешних интеграций...")
 

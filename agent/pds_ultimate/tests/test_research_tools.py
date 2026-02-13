@@ -183,7 +183,7 @@ class TestResearchToolRegistration:
             assert "query" in schema["function"]["parameters"]["required"]
 
     def test_total_tools_count(self):
-        """38 инструментов: 16 business + 5 browser + 3 research + 7 part7 + 7 part8."""
+        """46 инструментов: 16 business + 5 browser + 3 research + 7 part7 + 7 part8 + 8 part9."""
         from pds_ultimate.core.tools import ToolRegistry
 
         registry = ToolRegistry()
@@ -191,9 +191,9 @@ class TestResearchToolRegistration:
 
         with patch("pds_ultimate.core.business_tools.tool_registry", registry):
             count = register_all_tools()
-            assert count == 38
+            assert count == 46
             # list_names() filters visible=False (security_emergency)
-            assert len(registry.list_names()) == 37
+            assert len(registry.list_names()) == 45
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
