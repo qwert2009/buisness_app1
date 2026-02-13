@@ -126,6 +126,34 @@ async def main():
         f"tasks={cog_stats['tasks']['total']}"
     )
 
+    # Part 8: New engines
+    from pds_ultimate.core.autonomy_engine import autonomy_engine
+    from pds_ultimate.core.memory_v2 import memory_v2
+    from pds_ultimate.core.plugin_system import plugin_manager
+
+    # Load plugins from disk
+    plugin_manager.load()
+
+    logger.info(
+        f"  🔌 Plugin System: {plugin_manager.get_stats()['total']} плагинов"
+    )
+    logger.info(
+        f"  🤖 Autonomy Engine: ready "
+        f"(tasks={autonomy_engine.get_stats()['total']})"
+    )
+    logger.info(
+        "  🌐 Browser Pro: anti-bot stealth + form filler"
+    )
+    logger.info(
+        "  🔬 Reasoning v2: trust scorer + contradiction detector + "
+        "hypothesis tester + context compressor"
+    )
+    mv2_stats = memory_v2.get_stats()
+    logger.info(
+        f"  🧠 Memory v2: skills={mv2_stats['skills']}, "
+        f"failures={mv2_stats['failures']}, patterns={mv2_stats['patterns']}"
+    )
+
     logger.info("  ✅ AI Agent System инициализирована")
 
     # ─── 4. Запуск интеграций ────────────────────────────────────────────

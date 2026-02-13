@@ -1410,6 +1410,109 @@ def register_all_tools() -> int:
             handler=tool_archivist_rename,
             category="files",
         ),
+
+        # ─── Part 8: Plugin System ──────────────────────────────────
+        Tool(
+            name="plugin_connect",
+            description=(
+                "Подключить внешний API как плагин. "
+                "Автоматически определяет тип API по URL или ключу. "
+                "Поддержка: OpenAI, Anthropic, Stripe, SendGrid, Twilio, Google, Telegram и другие."
+            ),
+            parameters=[
+                ToolParameter("name", "string",
+                              "Имя плагина (например: 'stripe', 'my_api')", True),
+                ToolParameter("base_url", "string",
+                              "Базовый URL API", True),
+                ToolParameter("api_key", "string",
+                              "API ключ (если нужен)", False),
+                ToolParameter("plugin_type", "string",
+                              "Тип: REST_API/LLM_API/PAYMENT_API/MESSAGING_API/CLOUD_API/WEBHOOK", False, "REST_API"),
+            ],
+            handler=tool_plugin_connect,
+            category="plugins",
+        ),
+        Tool(
+            name="plugin_execute",
+            description=(
+                "Выполнить действие через подключённый плагин. "
+                "Вызывает endpoint API с указанными параметрами."
+            ),
+            parameters=[
+                ToolParameter("plugin_name", "string",
+                              "Имя плагина", True),
+                ToolParameter("endpoint", "string",
+                              "Путь endpoint (например '/chat/completions')", True),
+                ToolParameter("method", "string",
+                              "HTTP метод (GET/POST/PUT/DELETE)", False, "GET"),
+                ToolParameter("body", "string",
+                              "Тело запроса (JSON строка)", False),
+            ],
+            handler=tool_plugin_execute,
+            category="plugins",
+        ),
+        Tool(
+            name="plugin_list",
+            description="Показать список подключённых плагинов и их статус.",
+            parameters=[],
+            handler=tool_plugin_list,
+            category="plugins",
+        ),
+
+        # ─── Part 8: Autonomous Tasks ───────────────────────────────
+        Tool(
+            name="autonomous_task",
+            description=(
+                "Создать автономную задачу. Агент декомпозирует цель на шаги "
+                "и выполняет их самостоятельно с самокоррекцией при ошибках. "
+                "Для сложных многошаговых задач."
+            ),
+            parameters=[
+                ToolParameter("goal", "string",
+                              "Описание цели (что нужно сделать)", True),
+                ToolParameter("priority", "string",
+                              "Приоритет: critical/high/normal/low/background", False, "normal"),
+                ToolParameter("deadline_hours", "number",
+                              "Дедлайн в часах (0 = без дедлайна)", False, 0),
+            ],
+            handler=tool_autonomous_task,
+            category="autonomy",
+        ),
+        Tool(
+            name="task_status",
+            description="Показать статус автономных задач.",
+            parameters=[
+                ToolParameter("task_id", "string",
+                              "ID задачи (если пусто — все активные)", False),
+            ],
+            handler=tool_task_status,
+            category="autonomy",
+        ),
+
+        # ─── Part 8: Memory & Learning ──────────────────────────────
+        Tool(
+            name="learn_skill",
+            description=(
+                "Научить агента новому навыку/стратегии. "
+                "Агент запомнит паттерн и будет использовать его в будущем."
+            ),
+            parameters=[
+                ToolParameter("name", "string", "Название навыка", True),
+                ToolParameter("pattern", "string",
+                              "Regex паттерн для активации (например 'курс|валют')", True),
+                ToolParameter("strategy", "string",
+                              "Описание стратегии (что делать)", True),
+            ],
+            handler=tool_learn_skill,
+            category="memory",
+        ),
+        Tool(
+            name="memory_stats",
+            description="Статистика памяти: навыки, ошибки, паттерны, обучение.",
+            parameters=[],
+            handler=tool_memory_stats,
+            category="memory",
+        ),
     ]
 
     for tool in tools:
@@ -1417,6 +1520,300 @@ def register_all_tools() -> int:
 
     logger.info(f"Зарегистрировано {len(tools)} бизнес-инструментов агента")
     return len(tools)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART 8: PLUGIN TOOLS (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_plugin_connect(
+    name: str,
+    base_url: str,
+    api_key: str = "",
+    plugin_type: str = "REST_API",
+    **kwargs,
+) -> ToolResult:
+    """Подключить внешний API как плагин."""
+    from pds_ultimate.core.plugin_system import PluginType, plugin_manager
+
+    try:
+        # Маппинг строки в enum
+        type_map = {t.value: t for t in PluginType}
+        p_type = type_map.get(plugin_type.upper(), PluginType.REST_API)
+
+        plugin = await plugin_manager.register_plugin(
+            name=name,
+            base_url=base_url,
+            api_key=api_key if api_key else None,
+            plugin_type=p_type,
+            user_id=kwargs.get("_user_id", "system"),
+        )
+
+        return ToolResult(
+            "plugin_connect", True,
+            f"✅ Плагин «{plugin.name}» подключён\n"
+            f"  🔗 URL: {plugin.base_url}\n"
+            f"  📋 Тип: {plugin.plugin_type.value}\n"
+            f"  🆔 ID: {plugin.id}",
+            data={"plugin_id": plugin.id, "name": plugin.name},
+        )
+    except Exception as e:
+        return ToolResult(
+            "plugin_connect", False, "",
+            error=f"Ошибка подключения плагина: {e}",
+        )
+
+
+async def tool_plugin_execute(
+    plugin_name: str,
+    endpoint: str,
+    method: str = "GET",
+    body: str = "",
+    **kwargs,
+) -> ToolResult:
+    """Выполнить запрос через плагин."""
+    import json as _json
+
+    from pds_ultimate.core.plugin_system import plugin_manager
+
+    try:
+        plugin = plugin_manager.get_by_name(plugin_name)
+        if not plugin:
+            return ToolResult(
+                "plugin_execute", False, "",
+                error=f"Плагин «{plugin_name}» не найден",
+            )
+
+        # Парсим тело запроса
+        json_body = None
+        if body:
+            try:
+                json_body = _json.loads(body)
+            except _json.JSONDecodeError:
+                json_body = {"data": body}
+
+        result = await plugin_manager.execute(
+            plugin_id=plugin.id,
+            endpoint=endpoint,
+            method=method.upper(),
+            json_data=json_body,
+        )
+
+        # Форматируем ответ
+        if isinstance(result, dict):
+            output = _json.dumps(result, ensure_ascii=False, indent=2)[:3000]
+        else:
+            output = str(result)[:3000]
+
+        return ToolResult(
+            "plugin_execute", True,
+            f"📡 {plugin_name} → {method.upper()} {endpoint}\n\n{output}",
+            data=result if isinstance(result, dict) else {"response": output},
+        )
+    except Exception as e:
+        return ToolResult(
+            "plugin_execute", False, "",
+            error=f"Ошибка вызова плагина: {e}",
+        )
+
+
+async def tool_plugin_list(**kwargs) -> ToolResult:
+    """Список подключённых плагинов."""
+    from pds_ultimate.core.plugin_system import plugin_manager
+
+    stats = plugin_manager.get_stats()
+    plugins = plugin_manager.get_active_plugins()
+
+    if not plugins:
+        return ToolResult(
+            "plugin_list", True,
+            "📋 Нет подключённых плагинов.\n"
+            "Используй plugin_connect для подключения API.",
+        )
+
+    lines = [f"📋 Плагины ({stats['total']}):"]
+    for p in plugins:
+        lines.append(
+            f"  • {p.name} [{p.plugin_type.value}] — {p.status.value}\n"
+            f"    🔗 {p.base_url}"
+        )
+
+    return ToolResult(
+        "plugin_list", True, "\n".join(lines),
+        data=stats,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART 8: AUTONOMY TOOLS (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_autonomous_task(
+    goal: str,
+    priority: str = "normal",
+    deadline_hours: float = 0,
+    **kwargs,
+) -> ToolResult:
+    """Создать автономную задачу."""
+    from pds_ultimate.core.autonomy_engine import TaskPriority, autonomy_engine
+
+    try:
+        # Маппинг строки в приоритет
+        priority_map = {
+            "critical": TaskPriority.CRITICAL,
+            "high": TaskPriority.HIGH,
+            "normal": TaskPriority.NORMAL,
+            "low": TaskPriority.LOW,
+            "background": TaskPriority.BACKGROUND,
+        }
+        p = priority_map.get(priority.lower(), TaskPriority.NORMAL)
+
+        # Дедлайн
+        from datetime import datetime, timedelta
+        deadline = None
+        if deadline_hours and float(deadline_hours) > 0:
+            deadline = datetime.utcnow() + timedelta(hours=float(deadline_hours))
+
+        task = autonomy_engine.create_task(
+            goal=goal,
+            user_id=kwargs.get("_user_id", "system"),
+            priority=p,
+            deadline=deadline,
+        )
+
+        lines = [
+            "🤖 Автономная задача создана:",
+            f"  🆔 ID: {task.id}",
+            f"  🎯 Цель: {task.goal}",
+            f"  ⚡ Приоритет: {priority}",
+        ]
+        if deadline:
+            lines.append(f"  ⏰ Дедлайн: {deadline.strftime('%Y-%m-%d %H:%M')}")
+
+        return ToolResult(
+            "autonomous_task", True, "\n".join(lines),
+            data={"task_id": task.id, "status": task.status.value},
+        )
+    except Exception as e:
+        return ToolResult(
+            "autonomous_task", False, "",
+            error=f"Ошибка создания задачи: {e}",
+        )
+
+
+async def tool_task_status(task_id: str = "", **kwargs) -> ToolResult:
+    """Статус автономных задач."""
+    from pds_ultimate.core.autonomy_engine import autonomy_engine
+
+    try:
+        if task_id:
+            task = autonomy_engine.get_task(task_id)
+            if not task:
+                return ToolResult(
+                    "task_status", False, "",
+                    error=f"Задача {task_id} не найдена",
+                )
+            lines = [
+                f"📋 Задача {task.id}:",
+                f"  🎯 {task.goal}",
+                f"  📊 Статус: {task.status.value}",
+                f"  📈 Прогресс: {task.progress:.0%}",
+                f"  🔧 Шагов: {len(task.steps)}",
+            ]
+            if task.corrections:
+                lines.append(f"  🔄 Коррекций: {len(task.corrections)}")
+            return ToolResult(
+                "task_status", True, "\n".join(lines),
+                data={"task_id": task.id, "status": task.status.value,
+                      "progress": task.progress},
+            )
+
+        # Все активные
+        stats = autonomy_engine.get_stats()
+        queue = autonomy_engine.format_queue()
+        return ToolResult(
+            "task_status", True,
+            f"📋 Автономные задачи:\n{queue}\n\n"
+            f"📊 Всего: {stats['total']}, Активных: {stats['active']}",
+            data=stats,
+        )
+    except Exception as e:
+        return ToolResult(
+            "task_status", False, "",
+            error=f"Ошибка получения статуса: {e}",
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PART 8: MEMORY V2 TOOLS (handlers)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def tool_learn_skill(
+    name: str,
+    pattern: str,
+    strategy: str,
+    **kwargs,
+) -> ToolResult:
+    """Научить агента новому навыку."""
+    from pds_ultimate.core.memory_v2 import memory_v2
+
+    try:
+        skill = memory_v2.learn_skill(
+            name=name,
+            pattern=pattern,
+            strategy=strategy,
+        )
+        return ToolResult(
+            "learn_skill", True,
+            f"🎓 Навык «{skill.name}» сохранён!\n"
+            f"  📋 Паттерн: {pattern}\n"
+            f"  💡 Стратегия: {strategy}",
+            data=skill.to_dict(),
+        )
+    except Exception as e:
+        return ToolResult(
+            "learn_skill", False, "",
+            error=f"Ошибка сохранения навыка: {e}",
+        )
+
+
+async def tool_memory_stats(**kwargs) -> ToolResult:
+    """Статистика памяти v2."""
+    from pds_ultimate.core.memory_v2 import memory_v2
+
+    try:
+        stats = memory_v2.get_stats()
+
+        lines = [
+            "🧠 Статистика памяти v2:",
+            f"  🎓 Навыков: {stats['skills']}",
+            f"  ⚠️ Ошибок записано: {stats['failures']}",
+            f"  📊 Паттернов: {stats['patterns']}",
+        ]
+
+        if stats.get("top_skills"):
+            lines.append("\n🏆 Топ навыки:")
+            for s in stats["top_skills"]:
+                lines.append(f"  • {s['name']} ({s['success_rate']})")
+
+        fail_stats = stats.get("failure_stats", {})
+        if fail_stats.get("by_type"):
+            lines.append("\n📊 Ошибки по типу:")
+            for t, c in fail_stats["by_type"].items():
+                lines.append(f"  • {t}: {c}")
+
+        return ToolResult(
+            "memory_stats", True, "\n".join(lines),
+            data=stats,
+        )
+    except Exception as e:
+        return ToolResult(
+            "memory_stats", False, "",
+            error=f"Ошибка получения статистики: {e}",
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
