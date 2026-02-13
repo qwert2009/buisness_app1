@@ -24,8 +24,8 @@ from pds_ultimate.core.production import (
     LogEntry,
     ProductionHardening,
     RateLimitEntry,
-    RateLimitResult,
     RateLimiter,
+    RateLimitResult,
     RequestRecord,
     RequestTracker,
     ShutdownPhase,
@@ -36,7 +36,6 @@ from pds_ultimate.core.production import (
     UptimeMonitor,
     production,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RATE LIMITER
@@ -687,7 +686,8 @@ class TestProductionHardening(unittest.TestCase):
 
         # Track request
         req_id = ph.request_tracker.start_request("u1", "search")
-        ph.request_tracker.finish_request(req_id, success=False, error="timeout")
+        ph.request_tracker.finish_request(
+            req_id, success=False, error="timeout")
 
         # Report error
         ph.error_reporter.report("TimeoutError", "LLM timeout", "agent")

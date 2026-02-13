@@ -1,0 +1,70 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# PDS-Ultimate — Docker Compose
+# ═══════════════════════════════════════════════════════════════════════════════
+# Запуск:  docker compose up -d
+# Логи:   docker compose logs -f pds
+# Стоп:   docker compose down
+# Rebuild: docker compose up -d --build
+# ═══════════════════════════════════════════════════════════════════════════════
+
+services:
+  pds:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pds-ultimate
+    restart: unless-stopped
+
+    # ─── Environment ───────────────────────────────────────────────────
+    env_file:
+      - pds_ultimate/.env
+
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Ashgabat
+      - WHISPER_DEVICE=cpu
+
+    # ─── Volumes (persist data across restarts) ────────────────────────
+    volumes:
+      # БД и данные
+      - pds-data:/app/pds_ultimate/data
+      # Логи
+      - pds-logs:/app/pds_ultimate/logs
+      # Credentials (Gmail OAuth tokens, etc.)
+      - ./pds_ultimate/credentials:/app/pds_ultimate/credentials:ro
+      # Telethon session (persist auth)
+      - pds-sessions:/app
+
+    # ─── Resources ─────────────────────────────────────────────────────
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+        reservations:
+          memory: 512M
+          cpus: "0.5"
+
+    # ─── Health ────────────────────────────────────────────────────────
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import pds_ultimate; print('OK')" ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    # ─── Logging ───────────────────────────────────────────────────────
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+# ─── Named Volumes ──────────────────────────────────────────────────────────
+volumes:
+  pds-data:
+    driver: local
+  pds-logs:
+    driver: local
+  pds-sessions:
+    driver: local

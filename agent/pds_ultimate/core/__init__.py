@@ -21,13 +21,13 @@ from pds_ultimate.core.evening_digest import EveningDigestEngine, evening_digest
 # Part 11
 from pds_ultimate.core.integration_layer import IntegrationLayer, integration_layer
 from pds_ultimate.core.llm_engine import LLMEngine, llm_engine
-
-# Part 12
-from pds_ultimate.core.production import ProductionHardening, production
 from pds_ultimate.core.memory_v2 import MemoryV2Engine, memory_v2
 
 # Part 8
 from pds_ultimate.core.plugin_system import PluginManager, plugin_manager
+
+# Part 12
+from pds_ultimate.core.production import ProductionHardening, production
 from pds_ultimate.core.reasoning_v2 import ReasoningLayerV2, reasoning_v2
 from pds_ultimate.core.scheduler import TaskScheduler, scheduler
 from pds_ultimate.core.semantic_search_v2 import SemanticSearchV2, semantic_search_v2
