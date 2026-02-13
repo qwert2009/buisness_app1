@@ -21,6 +21,9 @@ from pds_ultimate.core.evening_digest import EveningDigestEngine, evening_digest
 # Part 11
 from pds_ultimate.core.integration_layer import IntegrationLayer, integration_layer
 from pds_ultimate.core.llm_engine import LLMEngine, llm_engine
+
+# Part 12
+from pds_ultimate.core.production import ProductionHardening, production
 from pds_ultimate.core.memory_v2 import MemoryV2Engine, memory_v2
 
 # Part 8
@@ -78,4 +81,7 @@ __all__ = [
     # Part 11
     "IntegrationLayer",
     "integration_layer",
+    # Part 12
+    "ProductionHardening",
+    "production",
 ]

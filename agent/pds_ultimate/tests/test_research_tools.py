@@ -191,9 +191,9 @@ class TestResearchToolRegistration:
 
         with patch("pds_ultimate.core.business_tools.tool_registry", registry):
             count = register_all_tools()
-            assert count == 60
+            assert count == 64
             # list_names() filters visible=False (security_emergency)
-            assert len(registry.list_names()) == 59
+            assert len(registry.list_names()) == 63
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -1915,6 +1915,61 @@ def register_all_tools() -> int:
             handler=tool_list_chains,
             category="integration",
         ),
+
+        # ─── Part 12: Production Hardening ──────────────────────────────
+        Tool(
+            name="system_health",
+            description=(
+                "Полный системный отчёт: аптайм, здоровье подсистем, "
+                "CPU, RAM, диск, активные алерты."
+            ),
+            parameters=[
+                ToolParameter("section", "string",
+                              "Секция: full/health/system/requests/errors/alerts",
+                              False, "full"),
+            ],
+            handler=tool_system_health,
+            category="production",
+        ),
+        Tool(
+            name="rate_limit_info",
+            description=(
+                "Показать статус rate-лимитов: кто заблокирован, "
+                "сколько запросов осталось."
+            ),
+            parameters=[
+                ToolParameter("key", "string",
+                              "Конкретный ключ (user_id или tool_name), "
+                              "пусто = общая статистика",
+                              False, ""),
+            ],
+            handler=tool_rate_limit_info,
+            category="production",
+        ),
+        Tool(
+            name="error_report",
+            description=(
+                "Отчёт об ошибках: последние ошибки, топ по частоте, "
+                "статистика по типам."
+            ),
+            parameters=[
+                ToolParameter("action", "string",
+                              "Действие: recent/top/stats/clear",
+                              False, "recent"),
+            ],
+            handler=tool_error_report,
+            category="production",
+        ),
+        Tool(
+            name="uptime_info",
+            description=(
+                "Информация об аптайме системы: время работы, "
+                "перезагрузки, простои."
+            ),
+            parameters=[],
+            handler=tool_uptime_info,
+            category="production",
+        ),
     ]
 
     for tool in tools:
@@ -3568,4 +3623,211 @@ async def tool_list_chains(**kwargs) -> ToolResult:
         return ToolResult(
             "list_chains", False, "",
             error=f"Ошибка получения списка цепочек: {e}",
+        )
+
+
+# ── Part 12: Production Hardening handlers ───────────────────────────────
+
+async def tool_system_health(
+    section: str = "full",
+    **kwargs,
+) -> ToolResult:
+    """Полный системный отчёт."""
+    from pds_ultimate.core.production import production
+
+    try:
+        report = production.get_system_report()
+
+        if section != "full" and section in report:
+            report = {section: report[section]}
+
+        lines = ["🏥 Системный отчёт:"]
+
+        # Uptime
+        if "uptime" in report:
+            up = report["uptime"]
+            lines.append(f"  ⏱️ Аптайм: {up.get('uptime_human', '?')}")
+            lines.append(f"  🔄 Перезагрузок: {up.get('restarts', 0)}")
+
+        # Health
+        if "health" in report:
+            h = report["health"]
+            overall = h.get("overall", "unknown")
+            icon = {"healthy": "✅", "degraded": "⚠️",
+                    "unhealthy": "❌"}.get(overall, "❓")
+            lines.append(f"  {icon} Здоровье: {overall}")
+            subs = h.get("subsystems", {})
+            for name, info in list(subs.items())[:10]:
+                s_icon = {"healthy": "✅", "degraded": "⚠️",
+                          "unhealthy": "❌"}.get(
+                    info.get("status", ""), "❓")
+                lines.append(f"    {s_icon} {name}: {info.get('status', '?')}")
+
+        # System
+        if "system" in report:
+            sys_m = report["system"]
+            mem = sys_m.get("memory", {})
+            disk = sys_m.get("disk", {})
+            if mem.get("rss_mb"):
+                lines.append(f"  💾 RAM: {mem['rss_mb']}MB")
+            if disk.get("free_gb"):
+                lines.append(
+                    f"  💿 Диск: {disk.get('usage_percent', 0)}% "
+                    f"({disk['free_gb']}GB свободно)")
+
+        # Requests
+        if "requests" in report:
+            req = report["requests"]
+            lines.append(
+                f"  📊 Запросов: {req.get('total_requests', 0)} "
+                f"(ошибок: {req.get('error_rate', 0)}%)")
+
+        # Alerts
+        if "alerts" in report:
+            active = report["alerts"].get("active", [])
+            if active:
+                lines.append(f"  🚨 Активных алертов: {len(active)}")
+                for a in active[:5]:
+                    lines.append(f"    ⚠️ {a.get('name', '?')}: "
+                                 f"{a.get('message', '')}")
+            else:
+                lines.append("  ✅ Алертов нет")
+
+        return ToolResult(
+            "system_health", True, "\n".join(lines), data=report,
+        )
+    except Exception as e:
+        return ToolResult(
+            "system_health", False, "",
+            error=f"Ошибка системного отчёта: {e}",
+        )
+
+
+async def tool_rate_limit_info(
+    key: str = "",
+    **kwargs,
+) -> ToolResult:
+    """Статус rate-лимитов."""
+    from pds_ultimate.core.production import production
+
+    try:
+        if key:
+            status = production.rate_limiter.get_status(key)
+            lines = [
+                f"🚦 Rate limit для '{key}':",
+                f"  📊 Запросов: {status.get('current_count', 0)}"
+                f"/{status.get('max_requests', '?')}",
+                f"  ⏳ Осталось: {status.get('remaining', '?')}",
+                f"  🚫 Заблокирован: {'да' if status.get('blocked') else 'нет'}",
+            ]
+        else:
+            stats = production.rate_limiter.get_stats()
+            lines = [
+                "🚦 Rate Limits:",
+                f"  📊 Ключей: {stats['total_keys']}",
+                f"  🚫 Ограничено: {stats['total_limited']}",
+                f"  ⛔ Заблокировано: {stats['currently_blocked']}",
+                f"  ⚙️ Custom лимитов: {stats['custom_limits']}",
+            ]
+            status = stats
+
+        return ToolResult(
+            "rate_limit_info", True, "\n".join(lines), data=status,
+        )
+    except Exception as e:
+        return ToolResult(
+            "rate_limit_info", False, "",
+            error=f"Ошибка rate limit info: {e}",
+        )
+
+
+async def tool_error_report(
+    action: str = "recent",
+    **kwargs,
+) -> ToolResult:
+    """Отчёт об ошибках."""
+    from pds_ultimate.core.production import production
+
+    try:
+        er = production.error_reporter
+
+        if action == "clear":
+            er.clear()
+            return ToolResult(
+                "error_report", True,
+                "🗑️ История ошибок очищена.",
+                data={"cleared": True},
+            )
+
+        if action == "top":
+            top = er.get_top_errors(10)
+            if not top:
+                return ToolResult(
+                    "error_report", True,
+                    "✅ Ошибок не зафиксировано.", data={"top": []},
+                )
+            lines = ["📊 Топ ошибок по частоте:"]
+            for t in top:
+                lines.append(f"  • {t['type']}: {t['count']} раз")
+            return ToolResult(
+                "error_report", True, "\n".join(lines), data={"top": top},
+            )
+
+        if action == "stats":
+            stats = er.get_stats()
+            lines = [
+                "📊 Статистика ошибок:",
+                f"  📈 Всего: {stats['total_errors']}",
+                f"  🏷️ Типов: {stats['unique_types']}",
+                f"  📍 Источников: {stats['unique_sources']}",
+            ]
+            return ToolResult(
+                "error_report", True, "\n".join(lines), data=stats,
+            )
+
+        # recent (default)
+        recent = er.get_recent(10)
+        if not recent:
+            return ToolResult(
+                "error_report", True,
+                "✅ Недавних ошибок нет.", data={"recent": []},
+            )
+        lines = [f"🔴 Последние ошибки ({len(recent)}):"]
+        for r in recent:
+            lines.append(
+                f"  • [{r['type']}] {r['message'][:80]} "
+                f"({r['ago_s']:.0f}с назад)"
+            )
+        return ToolResult(
+            "error_report", True, "\n".join(lines),
+            data={"recent": recent},
+        )
+    except Exception as e:
+        return ToolResult(
+            "error_report", False, "",
+            error=f"Ошибка отчёта об ошибках: {e}",
+        )
+
+
+async def tool_uptime_info(**kwargs) -> ToolResult:
+    """Информация об аптайме."""
+    from pds_ultimate.core.production import production
+
+    try:
+        stats = production.uptime.get_stats()
+        lines = [
+            "⏱️ Аптайм системы:",
+            f"  🕐 Работает: {stats['uptime_human']}",
+            f"  📅 Запущена: {stats['started_at']}",
+            f"  🔄 Перезагрузок: {stats['restarts']}",
+            f"  ⏸️ Простой: {stats['total_downtime_s']}с",
+            f"  💓 Последний heartbeat: {stats['last_heartbeat_ago_s']:.1f}с назад",
+        ]
+        return ToolResult(
+            "uptime_info", True, "\n".join(lines), data=stats,
+        )
+    except Exception as e:
+        return ToolResult(
+            "uptime_info", False, "",
+            error=f"Ошибка аптайм info: {e}",
         )

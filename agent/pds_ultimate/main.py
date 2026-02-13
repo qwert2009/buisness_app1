@@ -243,6 +243,16 @@ async def main():
         f"fallbacks={il_stats.get('fallbacks', 0)}"
     )
 
+    # Part 12: Production Hardening — rate limiting, health, monitoring
+    from pds_ultimate.core.production import production
+
+    ph_stats = production.get_stats()
+    logger.info(
+        f"  🏥 Production Hardening: "
+        f"health={ph_stats['health']['overall']}, "
+        f"uptime={ph_stats['uptime']['uptime_human']}"
+    )
+
     # ─── 4. Запуск интеграций ────────────────────────────────────────────
     logger.info("[4/7] Запуск внешних интеграций...")
 
