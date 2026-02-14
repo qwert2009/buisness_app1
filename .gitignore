@@ -5,10 +5,30 @@ __pycache__/
 
 # ─── Secrets ──────────────────────────────────────────────────────────────────
 .env
+.env.*
 *.session
 *.session-journal
 credentials/
 token.json
+client_secret*.json
+*client_secret*.json
+*_secret_*.json
+*.pickle
+*.token
+*.key
+*.pem
+*.p12
+gmail_token.json
+calendar_token.json
+
+# ─── Junk / non-project files ────────────────────────────────────────────────
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.ogg
+*.wav
+*.zip
 
 # ─── Environment ──────────────────────────────────────────────────────────────
 .venv/

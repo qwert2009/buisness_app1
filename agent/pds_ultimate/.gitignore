@@ -8,23 +8,38 @@ build/
 
 # ─── Environment ──────────────────────────────────────────────────────────────
 .env
+.env.*
 .venv/
 venv/
 env/
 
 # ─── Data (создаётся автоматически) ──────────────────────────────────────────
-data/pds_ultimate.db
-data/whisper_models/
-data/wa_browser/
-data/backups/
-data/gmail_token.json
-data/calendar_token.json
+data/
+*.db
+*.sqlite
+*.sqlite3
 
 # ─── Logs ─────────────────────────────────────────────────────────────────────
 logs/
+*.log
 
-# ─── Credentials ──────────────────────────────────────────────────────────────
+# ─── Secrets & API Keys ──────────────────────────────────────────────────────
 credentials/
+client_secret*.json
+*client_secret*.json
+*_secret_*.json
+*.pickle
+*.token
+*.key
+*.pem
+*.p12
+token.json
+gmail_token.json
+calendar_token.json
+
+# ─── Telethon / Telegram sessions ────────────────────────────────────────────
+*.session
+*.session-journal
 
 # ─── IDE ──────────────────────────────────────────────────────────────────────
 .idea/
@@ -32,10 +47,18 @@ credentials/
 *.swp
 *.swo
 
-# ─── Telethon sessions ───────────────────────────────────────────────────────
-*.session
-*.session-journal
-
 # ─── OS ───────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ─── Media / junk ────────────────────────────────────────────────────────────
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.ogg
+*.wav
+
+# ─── Vosk models (большие файлы) ─────────────────────────────────────────────
+vosk-model-*/
+*.zip
