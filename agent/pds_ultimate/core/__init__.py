@@ -32,6 +32,9 @@ from pds_ultimate.core.reasoning_v2 import ReasoningLayerV2, reasoning_v2
 from pds_ultimate.core.scheduler import TaskScheduler, scheduler
 from pds_ultimate.core.semantic_search_v2 import SemanticSearchV2, semantic_search_v2
 from pds_ultimate.core.smart_triggers import TriggerManager, trigger_manager
+
+# Part 14
+from pds_ultimate.core.speech_engine import SpeechEngine, speech_engine
 from pds_ultimate.core.task_prioritizer import TaskPrioritizer, task_prioritizer
 from pds_ultimate.core.time_relevance import TimeRelevanceEngine, time_relevance
 from pds_ultimate.core.workflow_engine import WorkflowEngine, workflow_engine
@@ -84,4 +87,7 @@ __all__ = [
     # Part 12
     "ProductionHardening",
     "production",
+    # Part 14
+    "SpeechEngine",
+    "speech_engine",
 ]

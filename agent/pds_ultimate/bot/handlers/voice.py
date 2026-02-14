@@ -4,7 +4,7 @@ PDS-Ultimate Voice Handler
 Обработка голосовых сообщений:
 1. Скачивание .ogg файла
 2. Конвертация в WAV (через ffmpeg)
-3. Распознавание Faster-Whisper (локально)
+3. Распознавание Vosk (offline, локально) + Whisper fallback
 4. Передача текста в Universal Handler
 """
 
@@ -29,6 +29,7 @@ router = Router(name="voice")
 async def handle_voice(message: Message, db_session: Session) -> None:
     """
     Голосовое сообщение → текст → обработка как текст.
+    Использует Vosk (offline) для распознавания речи.
     """
     chat_id = message.chat.id
     ctx = conversation_manager.get(chat_id)
@@ -37,7 +38,6 @@ async def handle_voice(message: Message, db_session: Session) -> None:
 
     tmp_dir = tempfile.mkdtemp(prefix="pds_voice_")
     ogg_path = Path(tmp_dir) / "voice.ogg"
-    wav_path = Path(tmp_dir) / "voice.wav"
 
     try:
         # ─── 1. Скачиваем файл голосового ────────────────────────────
@@ -50,32 +50,18 @@ async def handle_voice(message: Message, db_session: Session) -> None:
             f"длительность: {message.voice.duration}с"
         )
 
-        # ─── 2. Конвертация OGG → WAV (ffmpeg) ──────────────────────
-        import subprocess
+        # ─── 2. Распознавание через SpeechEngine (Vosk) ─────────────
+        #     SpeechEngine сам конвертирует OGG → WAV через ffmpeg
+        from pds_ultimate.core.speech_engine import speech_engine
 
-        result = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(ogg_path), "-ar",
-             "16000", "-ac", "1", str(wav_path)],
-            capture_output=True,
-            timeout=30,
-        )
-
-        if result.returncode != 0:
-            logger.error(f"ffmpeg ошибка: {result.stderr.decode()}")
-            await message.answer("❌ Не удалось обработать голосовое. Попробуй ещё раз.")
-            return
-
-        # ─── 3. Распознавание Faster-Whisper ─────────────────────────
-        from pds_ultimate.utils.parsers import parser
-
-        text = await parser.parse_voice(str(wav_path))
+        text = speech_engine.transcribe(str(ogg_path))
 
         if not text or text.strip() == "":
             await message.answer("🔇 Не удалось распознать речь. Попробуй ещё раз, говори чётче.")
             return
 
         logger.info(
-            f"Whisper распознал ({message.voice.duration}с): «{text[:100]}...»")
+            f"Vosk распознал ({message.voice.duration}с): «{text[:100]}...»")
 
         # Уведомляем пользователя о том что распознано
         preview = text[:200]
@@ -90,8 +76,7 @@ async def handle_voice(message: Message, db_session: Session) -> None:
             f"[голосовое {message.voice.duration}с]: {text}",
         )
 
-        # ─── 4. Обрабатываем как текстовое сообщение ─────────────────
-        # Подменяем текст и вызываем обработчик
+        # ─── 3. Обрабатываем как текстовое сообщение ─────────────────
         message.text = text
         await handle_text(message, db_session)
 
@@ -108,7 +93,7 @@ async def handle_voice(message: Message, db_session: Session) -> None:
 
     finally:
         # ─── Очистка временных файлов ────────────────────────────────
-        for p in [ogg_path, wav_path]:
+        for p in [ogg_path]:
             try:
                 if p.exists():
                     os.remove(p)
@@ -123,7 +108,7 @@ async def handle_voice(message: Message, db_session: Session) -> None:
 @router.message(F.video_note)
 async def handle_video_note(message: Message, db_session: Session) -> None:
     """
-    Видео-кружок → извлечение аудио → распознавание.
+    Видео-кружок → извлечение аудио → распознавание через Vosk.
     """
     chat_id = message.chat.id
 
@@ -131,28 +116,15 @@ async def handle_video_note(message: Message, db_session: Session) -> None:
 
     tmp_dir = tempfile.mkdtemp(prefix="pds_videonote_")
     video_path = Path(tmp_dir) / "video.mp4"
-    wav_path = Path(tmp_dir) / "audio.wav"
 
     try:
         file = await message.bot.get_file(message.video_note.file_id)
         await message.bot.download_file(file.file_path, destination=str(video_path))
 
-        import subprocess
+        # SpeechEngine сам конвертирует MP4 → WAV через ffmpeg
+        from pds_ultimate.core.speech_engine import speech_engine
 
-        result = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(video_path), "-vn",
-             "-ar", "16000", "-ac", "1", str(wav_path)],
-            capture_output=True,
-            timeout=60,
-        )
-
-        if result.returncode != 0:
-            await message.answer("❌ Не удалось обработать видео-кружок.")
-            return
-
-        from pds_ultimate.utils.parsers import parser
-
-        text = await parser.parse_voice(str(wav_path))
+        text = speech_engine.transcribe(str(video_path))
 
         if not text or text.strip() == "":
             await message.answer("🔇 Не удалось распознать речь из видео-кружка.")
@@ -173,7 +145,7 @@ async def handle_video_note(message: Message, db_session: Session) -> None:
         await message.answer("❌ Ошибка при обработке видео-кружка. Напиши текстом.")
 
     finally:
-        for p in [video_path, wav_path]:
+        for p in [video_path]:
             try:
                 if p.exists():
                     os.remove(p)

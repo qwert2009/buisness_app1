@@ -18,7 +18,6 @@ DeepSeek + regex одновременно для 100% точности.
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -587,85 +586,25 @@ class OCRParser:
             return ""
 
 
-# ─── Voice-парсер (Faster-Whisper) ──────────────────────────────────────────
+# ─── Voice-парсер (Vosk + Faster-Whisper fallback) ──────────────────────────
 
 class VoiceParser:
     """
-    Распознавание голосовых сообщений через Faster-Whisper (локально).
-    По ТЗ: бесплатно, работает на GPU/CPU сервера.
+    Распознавание голосовых сообщений через Vosk (локально, offline).
+    Fallback: Faster-Whisper если Vosk недоступен.
+    По ТЗ: бесплатно, работает на CPU сервера без GPU.
     """
-
-    _model = None  # Ленивая загрузка модели
-
-    @classmethod
-    def _load_model(cls):
-        """Загрузить модель Whisper (один раз)."""
-        if cls._model is not None:
-            return
-
-        try:
-            from faster_whisper import WhisperModel
-
-            device = config.whisper.device
-            if device == "auto":
-                try:
-                    import torch
-                    device = "cuda" if torch.cuda.is_available() else "cpu"
-                except ImportError:
-                    device = "cpu"
-
-            model_dir = str(config.whisper.model_dir)
-            os.makedirs(model_dir, exist_ok=True)
-
-            cls._model = WhisperModel(
-                config.whisper.model_size,
-                device=device,
-                compute_type=config.whisper.compute_type,
-                download_root=model_dir,
-            )
-            logger.info(
-                f"Faster-Whisper загружен: model={config.whisper.model_size}, "
-                f"device={device}"
-            )
-        except ImportError:
-            logger.error(
-                "Faster-Whisper не установлен: pip install faster-whisper"
-            )
-            raise
-        except Exception as e:
-            logger.error(f"Ошибка загрузки Whisper: {e}")
-            raise
 
     @classmethod
     def transcribe(cls, audio_path: str) -> str:
         """
         Транскрибировать аудио в текст.
         Поддерживает: ogg, mp3, wav, m4a и другие форматы.
+        Использует Vosk (offline) с fallback на faster-whisper.
         """
-        cls._load_model()
-
         try:
-            segments, info = cls._model.transcribe(
-                audio_path,
-                language=config.whisper.language,
-                beam_size=5,
-                vad_filter=True,  # Фильтрация тишины
-                vad_parameters=dict(
-                    min_silence_duration_ms=500,
-                ),
-            )
-
-            text_parts = []
-            for segment in segments:
-                text_parts.append(segment.text.strip())
-
-            full_text = " ".join(text_parts)
-            logger.info(
-                f"Whisper: распознано {len(text_parts)} сегментов, "
-                f"язык={info.language}, вероятность={info.language_probability:.2f}"
-            )
-            return full_text
-
+            from pds_ultimate.core.speech_engine import speech_engine
+            return speech_engine.transcribe(audio_path)
         except Exception as e:
             logger.error(f"Ошибка транскрибации: {e}")
             return ""
