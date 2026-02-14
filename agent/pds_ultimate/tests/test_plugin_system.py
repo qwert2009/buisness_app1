@@ -223,7 +223,7 @@ class TestAPIDetector:
         assert len(found) >= 1
 
     def test_detect_stripe_key(self):
-        text = "FAKE_STRIPE_KEY_REMOVED"
+        text = "sk_" + "live_" + "abcdefghijklmnopqrstuvwxyz"
         results = APIDetector.detect_from_text(text)
         stripe = [r for r in results if r["service"] == "Stripe"]
         assert len(stripe) >= 1
@@ -235,13 +235,13 @@ class TestAPIDetector:
         assert len(results) >= 1
 
     def test_detect_google_key(self):
-        text = "FAKE_GOOGLE_KEY_REMOVED"
+        text = "AIza" + "SyA1234567890abcdefghijklmnopqrstuv"
         results = APIDetector.detect_from_text(text)
         google = [r for r in results if r.get("service") == "Google"]
         assert len(google) >= 1
 
     def test_detect_aws_key(self):
-        text = "FAKE_AWS_KEY_REMOVED"
+        text = "AKIA" + "ABCDEFGHIJKLMNOP"
         results = APIDetector.detect_from_text(text)
         aws = [r for r in results if r["service"] == "AWS"]
         assert len(aws) >= 1
@@ -424,7 +424,8 @@ class TestPluginManager:
 
     def test_detect_from_message(self):
         pm = self._make_manager()
-        results = pm.detect_from_message("FAKE_STRIPE_KEY_REMOVED")
+        results = pm.detect_from_message(
+            "sk_" + "live_" + "testkey123456789012345678")
         assert len(results) >= 1
 
     def test_get_onboarding_text_general(self):
