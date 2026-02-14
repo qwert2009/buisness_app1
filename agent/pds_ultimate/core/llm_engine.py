@@ -149,7 +149,7 @@ class LLMEngine:
 
     async def start(self) -> None:
         """Запустить движок (создать HTTP клиент)."""
-        self._client = httpx.AsyncClient(
+        client_kwargs = dict(
             base_url=self._base_url,
             headers={
                 "Authorization": f"Bearer {self._api_key}",
@@ -157,6 +157,12 @@ class LLMEngine:
             },
             timeout=httpx.Timeout(self._timeout, connect=30.0),
         )
+        # Прокси для обхода блокировок
+        proxy_url = config.deepseek.proxy
+        if proxy_url:
+            client_kwargs["proxy"] = proxy_url
+            logger.info(f"LLM Engine proxy: {proxy_url}")
+        self._client = httpx.AsyncClient(**client_kwargs)
         logger.info("LLM Engine запущен")
 
     async def stop(self) -> None:

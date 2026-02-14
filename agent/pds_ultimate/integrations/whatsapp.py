@@ -61,7 +61,13 @@ class WhatsAppClient:
             f"/waInstance{self._instance_id}"
         )
 
-        self._http = httpx.AsyncClient(timeout=30.0)
+        # Прокси для обхода блокировок
+        proxy_url = config.telegram.proxy if hasattr(
+            config, 'telegram') else ""
+        http_kwargs: dict = {"timeout": 30.0}
+        if proxy_url:
+            http_kwargs["proxy"] = proxy_url
+        self._http = httpx.AsyncClient(**http_kwargs)
 
         # Проверяем статус авторизации
         authorized = await self.is_logged_in()

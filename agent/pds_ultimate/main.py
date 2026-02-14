@@ -77,10 +77,14 @@ async def main():
         logger.warning(f"  ⚠ Browser Engine: {e} (работа без браузера)")
 
     # Internet Reasoning Engine (использует Browser Engine)
-    logger.info(
-        "  🔬 Internet Reasoning Engine: готов "
-        f"(trust domains: {len(reasoning_engine.trust_scorer._domain_scores)})"
-    )
+    try:
+        from pds_ultimate.core.internet_reasoning import reasoning_engine
+        logger.info(
+            "  🔬 Internet Reasoning Engine: готов "
+            f"(trust domains: {len(reasoning_engine.trust_scorer._domain_scores)})"
+        )
+    except Exception as e:
+        logger.warning(f"  ⚠ Internet Reasoning Engine: {e}")
 
     # Part 6: Новые движки
     from pds_ultimate.core.parallel_engine import parallel_engine
@@ -90,15 +94,15 @@ async def main():
     logger.info("  💖 Emotional Intelligence Engine: готов")
     logger.info(
         f"  ⚡ Performance Engine: cache_max={performance_engine.cache._max_size}, "
-        f"dedup={performance_engine.deduplicator is not None}"
+        f"dedup={performance_engine.dedup is not None}"
     )
     logger.info(
         f"  🔀 Parallel Engine: "
-        f"categories={list(parallel_engine.concurrency.limits.keys())}"
+        f"max_concurrent={parallel_engine.concurrency._max_concurrent}"
     )
     logger.info(
         f"  🔍 Semantic Engine: "
-        f"index_size={semantic_engine.index.stats().total_documents}"
+        f"index_size={len(semantic_engine.index._vectors)}"
     )
 
     # Загружаем долгосрочную память из БД (оба менеджера)

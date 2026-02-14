@@ -117,6 +117,8 @@ class TelegramBotConfig:
     token: str = _env("TG_BOT_TOKEN")
     owner_id: int = _env_int("TG_OWNER_ID")
     parse_mode: str = "HTML"
+    # HTTP-прокси для обхода блокировок (например http://127.0.0.1:10809)
+    proxy: str = _env("TG_PROXY", "")
 
     def validate(self) -> None:
         if not self.token:
@@ -180,6 +182,8 @@ class DeepSeekConfig:
     timeout: int = _env_int("DEEPSEEK_TIMEOUT", 120)
     # Максимум повторов при ошибке
     max_retries: int = _env_int("DEEPSEEK_MAX_RETRIES", 3)
+    # HTTP-прокси (наследуется от TG_PROXY если не задано явно)
+    proxy: str = _env("DEEPSEEK_PROXY", _env("TG_PROXY", ""))
 
     def validate(self) -> None:
         if not self.api_key:

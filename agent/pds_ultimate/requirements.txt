@@ -16,6 +16,7 @@ faster-whisper>=1.0.0        # Fallback распознавание (если Vos
 
 # ─── Telegram ─────────────────────────────────────────────────────────────────
 aiogram>=3.10.0              # Telegram Bot Framework
+aiohttp-socks>=0.9.0         # Proxy support для aiogram (SOCKS/HTTP)
 Telethon>=1.36.0             # Telegram Userbot (мимикрия, чтение чатов)
 
 # ─── WhatsApp ─────────────────────────────────────────────────────────────────

@@ -31,6 +31,7 @@ from apscheduler.events import (
 )
 from apscheduler.executors.asyncio import AsyncIOExecutor
 from apscheduler.executors.pool import ThreadPoolExecutor
+from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -56,12 +57,14 @@ class TaskScheduler:
     """
 
     def __init__(self):
-        # Хранилище задач в SQLite (отказоустойчивость)
+        # Хранилище задач в SQLite (отказоустойчивость) для пользовательских задач
+        # Memory jobstore для builtin задач (bound methods не сериализуются)
         jobstores = {
             "default": SQLAlchemyJobStore(
                 url=f"sqlite:///{DATABASE_PATH}",
                 tablename="apscheduler_jobs",
-            )
+            ),
+            "builtin": MemoryJobStore(),
         }
 
         # Исполнители
@@ -193,6 +196,7 @@ class TaskScheduler:
         args: Optional[tuple] = None,
         kwargs: Optional[dict] = None,
         replace: bool = True,
+        jobstore: str = "default",
         **cron_kwargs,
     ) -> None:
         """
@@ -214,6 +218,7 @@ class TaskScheduler:
             kwargs=kwargs,
             replace_existing=replace,
             name=job_id,
+            jobstore=jobstore,
         )
         logger.debug(f"Cron-задача добавлена: {job_id} → {cron_kwargs}")
 
@@ -224,6 +229,7 @@ class TaskScheduler:
         args: Optional[tuple] = None,
         kwargs: Optional[dict] = None,
         replace: bool = True,
+        jobstore: str = "default",
         **interval_kwargs,
     ) -> None:
         """
@@ -245,6 +251,7 @@ class TaskScheduler:
             kwargs=kwargs,
             replace_existing=replace,
             name=job_id,
+            jobstore=jobstore,
         )
         logger.debug(
             f"Interval-задача добавлена: {job_id} → {interval_kwargs}")
@@ -313,10 +320,13 @@ class TaskScheduler:
         """
         sc = config.scheduler
 
+        _js = "builtin"  # Memory jobstore — bound methods не сериализуются
+
         # 1. Утренний брифинг (08:30 каждый день)
         self.add_cron(
             func=self._job_morning_brief,
             job_id="builtin_morning_brief",
+            jobstore=_js,
             hour=sc.morning_brief_hour,
             minute=sc.morning_brief_minute,
         )
@@ -325,6 +335,7 @@ class TaskScheduler:
         self.add_interval(
             func=self._job_check_calendar_reminders,
             job_id="builtin_calendar_reminder_check",
+            jobstore=_js,
             minutes=1,
         )
 
@@ -332,6 +343,7 @@ class TaskScheduler:
         self.add_cron(
             func=self._job_3day_report,
             job_id="builtin_3day_report",
+            jobstore=_js,
             day=f"*/{sc.report_interval_days}",
             hour=sc.report_hour,
             minute=sc.report_minute,
@@ -342,6 +354,7 @@ class TaskScheduler:
             self.add_cron(
                 func=self._job_daily_backup,
                 job_id="builtin_daily_backup",
+                jobstore=_js,
                 hour=sc.backup_hour,
                 minute=sc.backup_minute,
             )
@@ -350,6 +363,7 @@ class TaskScheduler:
         self.add_cron(
             func=self._job_tuesday_status_check,
             job_id="builtin_tuesday_status_check",
+            jobstore=_js,
             day_of_week="tue",
             hour=10,
             minute=0,
@@ -359,6 +373,7 @@ class TaskScheduler:
         self.add_interval(
             func=self._job_check_reminders,
             job_id="builtin_reminder_check",
+            jobstore=_js,
             hours=1,
         )
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from sqlalchemy.orm import sessionmaker
 
@@ -42,8 +43,15 @@ async def create_bot(
     logger.info("🤖 Создание Telegram бота...")
 
     # ─── 1. Bot instance ─────────────────────────────────────────────
+    # Прокси для обхода блокировок Telegram API
+    session = None
+    if config.telegram.proxy:
+        session = AiohttpSession(proxy=config.telegram.proxy)
+        logger.info(f"  🌐 Telegram proxy: {config.telegram.proxy}")
+
     bot = Bot(
         token=config.telegram.token,
+        session=session,
         default=DefaultBotProperties(
             parse_mode=ParseMode.HTML,
         ),
